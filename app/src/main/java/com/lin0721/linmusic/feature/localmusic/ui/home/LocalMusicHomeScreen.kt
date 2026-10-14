@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,8 +41,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +76,10 @@ import com.lin0721.linmusic.core.ui.theme.PillRadius
 import com.lin0721.linmusic.feature.cloud.domain.formatFileSize
 import com.lin0721.linmusic.feature.localmusic.domain.LocalLibraryIndex
 import com.lin0721.linmusic.feature.localmusic.domain.LocalPlaylist
+import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchState
+import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchStatus
+import com.lin0721.linmusic.feature.localmusic.data.batch.BatchLocalMatchRepository
+import com.lin0721.linmusic.feature.localmusic.ui.BatchLocalMatchSheet
 import com.lin0721.linmusic.feature.localmusic.ui.LocalLibraryStateGate
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicNavigation
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicUiState
@@ -85,6 +92,7 @@ import com.lin0721.linmusic.feature.localmusic.ui.components.LocalTrackRow
 import com.lin0721.linmusic.feature.localmusic.ui.playlist.LocalPlaylistCover
 import com.lin0721.linmusic.feature.localmusic.ui.playlist.NewPlaylistTile
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 
 private const val RECENT_TRACK_COUNT = 5
 private const val SHELF_ITEM_COUNT = 10
@@ -104,7 +112,24 @@ fun LocalMusicHomeScreen(
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showImportSheet by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
+    var showBatchMatch by remember { mutableStateOf(false) }
+    var returnToBatchAfterAssociation by remember { mutableStateOf(false) }
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
+    val onlineAssociation by viewModel.onlineAssociation.collectAsStateWithLifecycle()
+    val batchRepository: BatchLocalMatchRepository = koinInject()
+    val batchState by batchRepository.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(library.tracks.size) { batchRepository.refresh() }
+    LaunchedEffect(showBatchMatch) {
+        if (showBatchMatch) batchRepository.refresh()
+    }
+    LaunchedEffect(onlineAssociation, returnToBatchAfterAssociation) {
+        if (returnToBatchAfterAssociation && onlineAssociation == null) {
+            batchRepository.refreshAfterManualAssociation()
+            returnToBatchAfterAssociation = false
+            showBatchMatch = true
+        }
+    }
 
     val importFilesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) viewModel.importFiles(uris)
@@ -138,6 +163,10 @@ fun LocalMusicHomeScreen(
                         showOverflowMenu = false
                         viewModel.load()
                     })
+                    DropdownMenuItem(text = { Text("批量匹配网易云") }, onClick = {
+                        showOverflowMenu = false
+                        showBatchMatch = true
+                    })
                     DropdownMenuItem(text = { Text("本地音乐设置") }, onClick = {
                         showOverflowMenu = false
                         navigation.openSettings()
@@ -158,7 +187,13 @@ fun LocalMusicHomeScreen(
                         playingMediaId = playingMediaId,
                         isPlaying = isPlaying,
                         viewModel = viewModel,
-                        navigation = navigation
+                        navigation = navigation,
+                        batchState = batchState,
+                        onOpenBatchMatch = { showBatchMatch = true },
+                        onStartBatchMatch = {
+                            showBatchMatch = true
+                            if (!batchState.isRunning) batchRepository.startOrResume()
+                        }
                     )
                 }
             }
@@ -166,6 +201,25 @@ fun LocalMusicHomeScreen(
     }
 
     LocalTrackActionsHost(viewModel = viewModel, navigation = navigation)
+
+    if (showBatchMatch) {
+        BatchLocalMatchSheet(
+            state = batchState,
+            onDismiss = { showBatchMatch = false },
+            onStartOrResume = batchRepository::startOrResume,
+            onPause = batchRepository::pause,
+            onRetryUnmatched = batchRepository::retryUnmatched,
+            onRefresh = batchRepository::refresh,
+            onManualAssociation = { row ->
+                showBatchMatch = false
+                returnToBatchAfterAssociation = true
+                viewModel.openOnlineAssociation(
+                    library.tracks.firstOrNull { it.uri == row.local.uri } ?: row.local,
+                    initialCandidates = (row.candidates + listOfNotNull(row.matchedTrack)).distinctBy { it.id }
+                )
+            }
+        )
+    }
 
     if (showImportSheet) {
         ImportSheet(
@@ -201,7 +255,10 @@ private fun HomeContent(
     playingMediaId: String?,
     isPlaying: Boolean,
     viewModel: LocalMusicViewModel,
-    navigation: LocalMusicNavigation
+    navigation: LocalMusicNavigation,
+    batchState: BatchLocalMatchState,
+    onOpenBatchMatch: () -> Unit,
+    onStartBatchMatch: () -> Unit
 ) {
     val recentTracks = remember(library) { library.tracks.sortedByDescending { it.dateAddedMs } }
 
@@ -212,6 +269,9 @@ private fun HomeContent(
                 onPlay = { viewModel.playTracks(recentTracks) },
                 onShuffle = { viewModel.playTracks(recentTracks, shuffle = true) }
             )
+        }
+        item(key = "batch_match") {
+            BatchMatchEntryCard(batchState, onOpenBatchMatch, onStartBatchMatch)
         }
         item(key = "entries") {
             QuickEntries(library = library, navigation = navigation)
@@ -312,6 +372,46 @@ private fun HomeContent(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun BatchMatchEntryCard(state: BatchLocalMatchState, onOpen: () -> Unit, onStart: () -> Unit) {
+    val matched = state.count(BatchLocalMatchStatus.MATCHED) + state.count(BatchLocalMatchStatus.ALREADY_LINKED)
+    val pending = state.count(BatchLocalMatchStatus.PENDING)
+    val errors = state.count(BatchLocalMatchStatus.ERROR)
+    val resumable = pending + errors
+    val unmatched = state.totalCount - matched - pending
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm)
+            .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = MelodiaSpacing.md, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).pressable(MelodiaPress.Card, onClick = onOpen)) {
+                Text("匹配网易云", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (state.isLoading) "正在读取本地关联…" else "已匹配 $matched · 未匹配 $unmatched · 待处理 $pending",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Button(onClick = if (state.isRunning || resumable == 0) onOpen else onStart,
+                enabled = !state.isLoading) {
+                Text(when {
+                    state.isRunning -> "查看进度"
+                    errors > 0 && pending == 0 -> "重试出错"
+                    resumable == 0 -> "查看结果"
+                    state.processedCount > 0 -> "继续匹配"
+                    else -> "开始匹配"
+                })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("自动核对并保存关联，明显的歌名序号会忽略。", modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (resumable > 0 || state.isRunning) TextButton(onClick = onOpen) { Text("查看结果") }
         }
     }
 }

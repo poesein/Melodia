@@ -13,6 +13,20 @@ class PreferredLocalAudioTest {
         assertEquals(studio.uri, PreferredLocalAudioMatcher.uniqueMatch(" SONG ", "artist", 181_000L, listOf(studio)))
     }
 
+    @Test fun obviousLocalTrackNumberIsIgnoredWithoutChangingAlbumComparison() {
+        val numbered = studio.copy(title = "01 Song", album = "01 Album")
+        assertEquals(numbered.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 181_000L, listOf(numbered)))
+        assertEquals(numbered.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 183_000L, listOf(numbered), "01 Album"))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 183_000L, listOf(numbered), "Album"))
+    }
+
+    @Test fun catalogTrackNumberAndNumericSongTitlesRemainAuthoritative() {
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("01 Song", "Artist", 180_000L, listOf(studio)))
+        val numeric = studio.copy(title = "7 rings")
+        assertEquals(numeric.uri, PreferredLocalAudioMatcher.uniqueMatch("7 rings", "Artist", 180_000L, listOf(numeric)))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("rings", "Artist", 180_000L, listOf(numeric)))
+    }
+
     @Test fun ambiguousCopiesAreNotChosen() {
         assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(studio, studio.copy(uri = "content://copy"))))
     }

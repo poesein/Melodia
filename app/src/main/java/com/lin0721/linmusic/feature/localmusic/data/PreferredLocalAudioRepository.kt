@@ -17,8 +17,14 @@ import com.lin0721.linmusic.feature.localmusic.domain.LocalTrack
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
 import com.lin0721.linmusic.feature.localmusic.domain.ManualLocalAudioAssociations
 import com.lin0721.linmusic.feature.localmusic.domain.PreferredLocalAudioMatcher
+import com.lin0721.linmusic.feature.localmusic.domain.LocalAudioCandidate
+import com.lin0721.linmusic.feature.localmusic.domain.BatchAssociationSaveResult
+import com.lin0721.linmusic.feature.localmusic.domain.BatchAssociationSaveStatus
+import com.lin0721.linmusic.feature.localmusic.domain.BatchOnlineMatchPolicy
+import com.lin0721.linmusic.feature.localmusic.domain.BatchOnlineMatchStatus
 import com.lin0721.linmusic.feature.localmusic.domain.resolvePreferredLocalAudio
 import com.lin0721.linmusic.feature.localmusic.data.transfer.*
+import com.lin0721.linmusic.feature.localmusic.data.batch.batchAssociationGuard
 import java.io.ByteArrayOutputStream
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -161,6 +167,97 @@ class PreferredLocalAudioRepository(
         }
     }
 
+    /** Re-read the audio, then atomically add a unique batch result without replacing any reference. */
+    suspend fun linkBatchMatch(
+        track: LocalTrack,
+        inspected: LocalAudioCandidate,
+        onlineTrack: Track
+    ): BatchAssociationSaveResult = withContext(Dispatchers.IO) {
+        if (track.source == LocalTrackSource.MELODIA_DOWNLOAD || onlineTrack.id <= 0L) {
+            return@withContext BatchAssociationSaveResult(BatchAssociationSaveStatus.CONFLICT, "下载记录无需批量关联")
+        }
+        val live = inspectAssociationFile(context, track.uri.toString(), track)
+            ?: return@withContext BatchAssociationSaveResult(BatchAssociationSaveStatus.UNREADABLE, "文件不可读取，请检查授权或重新扫描")
+        if (live.identity != inspected.identity || live.title != inspected.title || live.artist != inspected.artist ||
+            live.album != inspected.album || live.durationMs != inspected.durationMs || live.fileName != inspected.fileName) {
+            return@withContext BatchAssociationSaveResult(BatchAssociationSaveStatus.CHANGED, "搜索后文件信息发生变化，需重新核对")
+        }
+        val candidate = LocalAudioCandidate(live.uri, live.title, live.artist, live.durationMs, live.identity, live.album, live.fileName)
+        if (BatchOnlineMatchPolicy.evaluate(candidate, listOf(onlineTrack)).status != BatchOnlineMatchStatus.MATCHED) {
+            return@withContext BatchAssociationSaveResult(BatchAssociationSaveStatus.CHANGED, "重新读取的音频信息无法严格匹配，需手动核对")
+        }
+        var result = BatchAssociationSaveResult(BatchAssociationSaveStatus.CONFLICT, "关联冲突，原关联已保留")
+        context.preferredLocalAudioDataStore.edit { prefs ->
+            val guard = batchAssociationGuard(onlineTrack.id, live.uri, live.identity, prefs[excludedKey].orEmpty(), storedLinks(prefs)) {
+                localAudioIdentity(context, it)
+            }
+            if (guard != null) {
+                result = guard
+                return@edit
+            }
+            // Check again inside the edit transaction; user actions and other import jobs cannot race this write.
+            if (localAudioIdentity(context, live.uri) != live.identity) {
+                result = BatchAssociationSaveResult(BatchAssociationSaveStatus.CHANGED, "写入前文件状态变化，未建立关联")
+                return@edit
+            }
+            prefs[linkKey(onlineTrack.id)] = live.uri
+            prefs[localTitleKey(onlineTrack.id)] = live.title
+            prefs[localSnapshotKey(onlineTrack.id)] = snapshotJson.encodeToString(live.toBackupFile())
+            prefs[titleKey(onlineTrack.id)] = onlineTrack.name
+            prefs[artistKey(onlineTrack.id)] = onlineTrack.ar.joinToString(" • ") { it.name }
+            prefs[albumKey(onlineTrack.id)] = onlineTrack.al.name
+            prefs[durationKey(onlineTrack.id)] = onlineTrack.dt
+            result = BatchAssociationSaveResult(BatchAssociationSaveStatus.SAVED, "唯一严格匹配，已建立关联")
+        }
+        result
+    }
+
+    suspend fun confirmedTrack(songId: Long): Track? = withContext(Dispatchers.IO) {
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        if (prefs[linkKey(songId)] == null) null else cachedTrack(prefs, songId)
+    }
+
+    suspend fun confirmedTracks(): Map<Long, Track> = withContext(Dispatchers.IO) {
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        storedLinks(prefs).keys.associateWith { songId -> cachedTrack(prefs, songId) }
+    }
+
+    /** Inspect only this file and possible same-title aliases; avoid projecting the entire scanned library per row. */
+    suspend fun confirmedForLocalTrack(track: LocalTrack): Track? = withContext(Dispatchers.IO) {
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        val uri = track.uri.toString()
+        val links = storedLinks(prefs)
+        val exact = links.filterValues { it == uri }.keys
+        if (exact.isNotEmpty()) return@withContext exact.singleOrNull()?.let { cachedTrack(prefs, it) }
+        val possible = links.filter { (songId, _) ->
+            val title = prefs[localTitleKey(songId)]
+            title.isNullOrBlank() || PreferredLocalAudioMatcher.sameTitle(title, track.title) ||
+                PreferredLocalAudioMatcher.sameTitle(
+                    com.lin0721.linmusic.feature.localmusic.domain.LocalMatchTitle.forSearch(title),
+                    com.lin0721.linmusic.feature.localmusic.domain.LocalMatchTitle.forSearch(track.title))
+        }
+        if (possible.isEmpty()) return@withContext null
+        val identity = localAudioIdentity(context, uri) ?: return@withContext null
+        val ids = possible.filterValues { localAudioIdentity(context, it) == identity }.keys
+        ids.singleOrNull()?.let { cachedTrack(prefs, it) }
+    }
+
+    /** Confirmed online metadata is reusable evidence for alternate encodings; no reference is changed. */
+    suspend fun confirmedTracksForTitle(localTitle: String): List<Track> = withContext(Dispatchers.IO) {
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        storedLinks(prefs).keys.filter { songId ->
+            PreferredLocalAudioMatcher.sameLocalTitle(prefs[titleKey(songId)].orEmpty(), localTitle)
+        }.map { cachedTrack(prefs, it) }
+    }
+
+    private fun cachedTrack(prefs: Preferences, songId: Long) = Track(
+            id = songId,
+            name = prefs[titleKey(songId)].orEmpty(),
+            ar = prefs[artistKey(songId)]?.split(" • ")?.map { com.lin0721.linmusic.core.model.Artist(name = it) }.orEmpty(),
+            al = com.lin0721.linmusic.core.model.Album(name = prefs[albumKey(songId)].orEmpty()),
+            dt = prefs[durationKey(songId)] ?: 0L
+    )
+
     suspend fun unlink(songId: Long) {
         context.preferredLocalAudioDataStore.edit {
             it.remove(linkKey(songId))
@@ -192,7 +289,7 @@ class PreferredLocalAudioRepository(
             automaticEnabled = (prefs[automaticKey] ?: true) && songId.toString() !in prefs[excludedKey].orEmpty(),
             automaticUri = {
                 val candidates = readableLocalAudioCandidates(context, library.tracks.first().filter {
-                    it.source != LocalTrackSource.MELODIA_DOWNLOAD && PreferredLocalAudioMatcher.sameTitle(title, it.title)
+                    it.source != LocalTrackSource.MELODIA_DOWNLOAD && PreferredLocalAudioMatcher.sameLocalTitle(title, it.title)
                 })
                 if (candidates.isEmpty()) null else {
                     val cachedDuration = prefs[durationKey(songId)]
@@ -227,7 +324,7 @@ class PreferredLocalAudioRepository(
         val candidates = if (prefs[automaticKey] != false && cachedTitles.isNotEmpty()) {
             readableLocalAudioCandidates(context, library.tracks.first().filter { track ->
                 track.source != LocalTrackSource.MELODIA_DOWNLOAD && cachedTitles.any {
-                    PreferredLocalAudioMatcher.sameTitle(it, track.title)
+                    PreferredLocalAudioMatcher.sameLocalTitle(it, track.title)
                 }
             })
         } else emptyList()

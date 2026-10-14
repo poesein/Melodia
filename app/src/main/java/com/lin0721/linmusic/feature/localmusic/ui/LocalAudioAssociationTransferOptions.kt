@@ -65,7 +65,7 @@ fun LocalAudioAssociationTransferOptions() {
                 val result = repository.exportAssociations(destination)
                 report = AssociationTransferReport(
                     title = if (result.issues.isEmpty()) "关联备份已导出" else "关联备份已写入，部分记录需重新核对",
-                    summary = "已写入 ${result.recordCount} 条手动确认关联。备份不含音频文件与自动匹配结果。",
+                    summary = "已写入 ${result.recordCount} 条已确认关联（手动或批量）。备份不含音频文件与临时播放时的自动匹配结果。",
                     guidance = if (result.issues.isEmpty()) {
                         "在其他设备导入前，请先扫描或导入对应的本地音频。"
                     } else {
@@ -105,7 +105,7 @@ fun LocalAudioAssociationTransferOptions() {
     HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
     SettingsRow(
         title = "导出已确认的本地关联",
-        subtitle = "仅备份手动确认关联，不含音频文件与自动匹配结果",
+        subtitle = "备份已确认关联（手动或批量），不含音频与临时播放匹配结果",
         onClick = {
             if (canChooseDocument()) {
                 choosingDocument = true
@@ -165,7 +165,7 @@ fun LocalAudioAssociationTransferOptions() {
                         )
                     }
                     if (currentPreview.rows.isEmpty()) {
-                        Text("备份中没有手动确认的关联。")
+                        Text("备份中没有已确认的关联。")
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
                             items(currentPreview.rows) { row ->

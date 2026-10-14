@@ -23,6 +23,8 @@ sealed class Screen {
     @Serializable
     data object Home : Screen()
     @Serializable
+    data object Music : Screen()
+    @Serializable
     data class Playlist(val id: Long, val isAlbum: Boolean) : Screen()
     @Serializable
     data object Search : Screen()
@@ -112,13 +114,17 @@ class MelodiaNavigationState(
     initialLocalMusicIds: List<Long> = emptyList(),
     initialDownloadsIds: List<Long> = emptyList(),
     initialCloudIds: List<Long> = emptyList(),
-    initialMyProfileIds: List<Long> = emptyList()
+    initialMyProfileIds: List<Long> = emptyList(),
+    initialMusicStack: List<Screen> = listOf(Screen.Music),
+    initialMusicIds: List<Long> = emptyList(),
+    initialShowMusicNewWorks: Boolean = false
 ) {
 
     private var nextEntryId = initialNextEntryId
 
     private fun buildEntries(screens: List<Screen>, ids: List<Long>): List<NavEntry> =
         if (ids.size == screens.size) {
+            nextEntryId = maxOf(nextEntryId, (ids.maxOrNull() ?: -1L) + 1L)
             screens.mapIndexed { index, screen -> NavEntry(ids[index], screen) }
         } else {
             screens.map { screen -> NavEntry(nextEntryId++, screen) }
@@ -138,9 +144,11 @@ class MelodiaNavigationState(
         .apply { addAll(buildEntries(initialCloudStack, initialCloudIds)) }
     private val myProfileStack = mutableStateListOf<NavEntry>()
         .apply { addAll(buildEntries(initialMyProfileStack, initialMyProfileIds)) }
+    private val musicStack = mutableStateListOf<NavEntry>()
+        .apply { addAll(buildEntries(initialMusicStack, initialMusicIds)) }
 
     private val allStacks: List<List<NavEntry>>
-        get() = listOf(homeStack, searchStack, libraryStack, localMusicStack, downloadsStack, cloudStack, myProfileStack)
+        get() = listOf(homeStack, searchStack, libraryStack, localMusicStack, downloadsStack, cloudStack, myProfileStack, musicStack)
 
     init {
         // 恢复的 id 可能大于计数器，避免之后分配出重复 id
@@ -154,11 +162,11 @@ class MelodiaNavigationState(
         defaultRootTab = screen
     }
 
-    var activeTab by mutableStateOf(initialActiveTab)
+    var activeTab by mutableStateOf(if (initialActiveTab == Screen.Home && initialHomeTab == TAB_MUSIC) Screen.Music else initialActiveTab)
         private set
 
     private fun isTopLevelTab(screen: Screen): Boolean = when (screen) {
-        Screen.Home, Screen.Search, Screen.Library,
+        Screen.Home, Screen.Music, Screen.Search, Screen.Library,
         Screen.LocalMusic, Screen.Downloads, Screen.Cloud, Screen.MyProfile -> true
         else -> false
     }
@@ -170,6 +178,7 @@ class MelodiaNavigationState(
         Screen.Downloads -> downloadsStack
         Screen.Cloud -> cloudStack
         Screen.MyProfile -> myProfileStack
+        Screen.Music -> musicStack
         else -> homeStack
     }
 
@@ -187,16 +196,17 @@ class MelodiaNavigationState(
 
     // 是否还有可回退的页面层级（包括二级页面、非首选根 tab、主页非「全部」分类或展开的最新药丸）
     val canGoBackToHomeAll: Boolean
-        get() = canNavigateBack || activeTab != defaultRootTab || (activeTab == Screen.Home && (homeTab != TAB_ALL || showMusicNewWorks))
+        get() = canNavigateBack || activeTab != defaultRootTab ||
+            (activeTab == Screen.Home && homeTab != TAB_ALL) || (activeTab == Screen.Music && showMusicNewWorks)
 
     // 主页三个 tab 的选中项。存在导航状态里而非 HomeScreen 内部——
     // 页面切走时 HomeScreen 会离开 composition，记在里面的话从电台详情页退回来会跳回「全部」
-    var homeTab by mutableStateOf(initialHomeTab)
+    var homeTab by mutableStateOf(if (initialHomeTab == TAB_MUSIC) TAB_ALL else initialHomeTab)
         private set
 
     // 音乐 tab「最新」二级药丸的选中态，同样存在导航状态里——
     // 从新作 feed 点进专辑详情再返回时，HomeScreen 会被销毁重建，本地 remember 状态会丢
-    var showMusicNewWorks by mutableStateOf(false)
+    var showMusicNewWorks by mutableStateOf(initialShowMusicNewWorks)
         private set
 
     var searchAutoFocus by mutableStateOf(false)
@@ -259,15 +269,14 @@ class MelodiaNavigationState(
             activeTab = defaultRootTab
             if (defaultRootTab == Screen.Home) {
                 homeTab = TAB_ALL
-                showMusicNewWorks = false
             }
             return false
         }
+        if (defaultRootTab == Screen.Music && showMusicNewWorks) {
+            showMusicNewWorks = false
+            return false
+        }
         if (defaultRootTab == Screen.Home) {
-            if (showMusicNewWorks) {
-                showMusicNewWorks = false
-                return false
-            }
             if (homeTab != TAB_ALL) {
                 homeTab = TAB_ALL
                 return false
@@ -293,10 +302,12 @@ class MelodiaNavigationState(
     }
 
     fun selectHomeTab(index: Int) {
-        // 已在「音乐」默认内容时再点「音乐」回到「全部」，收起「最新」
-        homeTab = if (index == TAB_MUSIC && homeTab == TAB_MUSIC && !showMusicNewWorks) TAB_ALL else index
-        // 点任意主药丸都回到该 tab 的默认内容，「最新」只能通过下面的入口单独选中
-        showMusicNewWorks = false
+        // An old homepage callback can still reach the new independent music root.
+        if (index == TAB_MUSIC) {
+            navigateTo(Screen.Music)
+        } else {
+            homeTab = index
+        }
     }
 
     fun updateShowMusicNewWorks(show: Boolean) {
@@ -349,8 +360,8 @@ class MelodiaNavigationState(
 
     // 从主页搜索框进入时自动弹键盘，从底栏进入时展示发现内容
     fun openSearch(autoFocus: Boolean) {
+        openTab(Screen.Search)
         searchAutoFocus = autoFocus
-        navigateTo(Screen.Search)
     }
 
     // 底栏一级入口跳转：重置目标 Tab 的回退栈至第一级根界面，并切换激活态
@@ -379,7 +390,10 @@ class MelodiaNavigationState(
         downloadsIds = downloadsStack.map { it.id },
         cloudIds = cloudStack.map { it.id },
         myProfileIds = myProfileStack.map { it.id },
-        activeTabScreen = activeTab
+        activeTabScreen = activeTab,
+        musicStack = musicStack.map { it.screen },
+        musicIds = musicStack.map { it.id },
+        showMusicNewWorks = showMusicNewWorks
     )
 }
 
@@ -403,7 +417,10 @@ internal data class NavigationSnapshot(
     val downloadsIds: List<Long> = emptyList(),
     val cloudIds: List<Long> = emptyList(),
     val myProfileIds: List<Long> = emptyList(),
-    val activeTabScreen: Screen? = null
+    val activeTabScreen: Screen? = null,
+    val musicStack: List<Screen> = listOf(Screen.Music),
+    val musicIds: List<Long> = emptyList(),
+    val showMusicNewWorks: Boolean = false
 )
 
 private fun tabIndex(tab: Screen): Int = when (tab) {
@@ -413,6 +430,7 @@ private fun tabIndex(tab: Screen): Int = when (tab) {
     Screen.Downloads -> 4
     Screen.Cloud -> 5
     Screen.MyProfile -> 6
+    Screen.Music -> 7
     else -> 0
 }
 
@@ -423,10 +441,37 @@ private fun tabFromIndex(index: Int): Screen = when (index) {
     4 -> Screen.Downloads
     5 -> Screen.Cloud
     6 -> Screen.MyProfile
+    7 -> Screen.Music
     else -> Screen.Home
 }
 
 private val navigationJson = Json { ignoreUnknownKeys = true }
+
+internal fun restoreNavigationSnapshot(snapshot: NavigationSnapshot): MelodiaNavigationState {
+    val legacyMusic = snapshot.homeTab == TAB_MUSIC
+    return MelodiaNavigationState(
+        initialHomeStack = if (legacyMusic) listOf(Screen.Home) else snapshot.homeStack.ifEmpty { listOf(Screen.Home) },
+        initialSearchStack = snapshot.searchStack.ifEmpty { listOf(Screen.Search) },
+        initialLibraryStack = snapshot.libraryStack.ifEmpty { listOf(Screen.Library) },
+        initialActiveTab = snapshot.activeTabScreen ?: tabFromIndex(snapshot.activeTabIndex),
+        initialHomeTab = snapshot.homeTab,
+        initialHomeIds = if (legacyMusic) emptyList() else snapshot.homeIds,
+        initialSearchIds = snapshot.searchIds,
+        initialLibraryIds = snapshot.libraryIds,
+        initialNextEntryId = snapshot.nextEntryId,
+        initialLocalMusicStack = snapshot.localMusicStack.ifEmpty { listOf(Screen.LocalMusic) },
+        initialDownloadsStack = snapshot.downloadsStack.ifEmpty { listOf(Screen.Downloads) },
+        initialCloudStack = snapshot.cloudStack.ifEmpty { listOf(Screen.Cloud) },
+        initialMyProfileStack = snapshot.myProfileStack.ifEmpty { listOf(Screen.MyProfile) },
+        initialLocalMusicIds = snapshot.localMusicIds,
+        initialDownloadsIds = snapshot.downloadsIds,
+        initialCloudIds = snapshot.cloudIds,
+        initialMyProfileIds = snapshot.myProfileIds,
+        initialMusicStack = if (legacyMusic) listOf(Screen.Music) + snapshot.homeStack.drop(1) else snapshot.musicStack.ifEmpty { listOf(Screen.Music) },
+        initialMusicIds = if (legacyMusic) snapshot.homeIds else snapshot.musicIds,
+        initialShowMusicNewWorks = snapshot.showMusicNewWorks
+    )
+}
 
 private val MelodiaNavigationStateSaver: Saver<MelodiaNavigationState, String> = Saver(
     save = { state -> navigationJson.encodeToString(NavigationSnapshot.serializer(), state.toSnapshot()) },
@@ -437,26 +482,7 @@ private val MelodiaNavigationStateSaver: Saver<MelodiaNavigationState, String> =
         if (snapshot == null) {
             MelodiaNavigationState()
         } else {
-            val restoredTab = snapshot.activeTabScreen ?: tabFromIndex(snapshot.activeTabIndex)
-            MelodiaNavigationState(
-                initialHomeStack = snapshot.homeStack.ifEmpty { listOf(Screen.Home) },
-                initialSearchStack = snapshot.searchStack.ifEmpty { listOf(Screen.Search) },
-                initialLibraryStack = snapshot.libraryStack.ifEmpty { listOf(Screen.Library) },
-                initialActiveTab = restoredTab,
-                initialHomeTab = snapshot.homeTab,
-                initialHomeIds = snapshot.homeIds,
-                initialSearchIds = snapshot.searchIds,
-                initialLibraryIds = snapshot.libraryIds,
-                initialNextEntryId = snapshot.nextEntryId,
-                initialLocalMusicStack = snapshot.localMusicStack.ifEmpty { listOf(Screen.LocalMusic) },
-                initialDownloadsStack = snapshot.downloadsStack.ifEmpty { listOf(Screen.Downloads) },
-                initialCloudStack = snapshot.cloudStack.ifEmpty { listOf(Screen.Cloud) },
-                initialMyProfileStack = snapshot.myProfileStack.ifEmpty { listOf(Screen.MyProfile) },
-                initialLocalMusicIds = snapshot.localMusicIds,
-                initialDownloadsIds = snapshot.downloadsIds,
-                initialCloudIds = snapshot.cloudIds,
-                initialMyProfileIds = snapshot.myProfileIds
-            )
+            restoreNavigationSnapshot(snapshot)
         }
     }
 )

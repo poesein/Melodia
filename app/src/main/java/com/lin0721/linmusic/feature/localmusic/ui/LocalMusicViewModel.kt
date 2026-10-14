@@ -28,6 +28,7 @@ import com.lin0721.linmusic.feature.localmusic.domain.LocalTrack
 import com.lin0721.linmusic.feature.localmusic.domain.buildLocalLibraryIndex
 import com.lin0721.linmusic.feature.localmusic.domain.queueSongId
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
+import com.lin0721.linmusic.feature.localmusic.domain.LocalMatchTitle
 import com.lin0721.linmusic.feature.localmusic.domain.PreferredLocalAudioMatcher
 import com.lin0721.linmusic.feature.playlist.domain.SongCollectDelegate
 import com.lin0721.linmusic.feature.search.data.SearchRepository
@@ -341,12 +342,20 @@ class LocalMusicViewModel(
         _uiState.value = state.copy(menuState = null)
     }
 
-    fun openOnlineAssociation(track: LocalTrack) {
+    fun openOnlineAssociation(track: LocalTrack, initialCandidates: List<Track> = emptyList()) {
         if (track.source == LocalTrackSource.MELODIA_DOWNLOAD) return
         closeTrackMenu()
+        associationSearchJob?.cancel()
         val artist = track.artist.takeUnless { it.isBlank() || it == "未知艺术家" || it == "<unknown>" }.orEmpty()
-        _onlineAssociation.value = LocalOnlineAssociationState(track, "${track.title} $artist".trim())
-        searchOnlineAssociation()
+        val query = "${LocalMatchTitle.forSearch(track.title)} $artist".trim()
+        val candidates = initialCandidates.filter { it.id > 0L }.distinctBy { it.id }
+        _onlineAssociation.value = LocalOnlineAssociationState(
+            track = track,
+            query = query,
+            results = rankAssociationCandidates(candidates, track),
+            searchedQuery = if (candidates.isNotEmpty()) query else ""
+        )
+        if (candidates.isEmpty()) searchOnlineAssociation()
     }
 
     fun closeOnlineAssociation() {
@@ -401,7 +410,7 @@ class LocalMusicViewModel(
 
     private fun rankAssociationCandidates(candidates: List<Track>, local: LocalTrack): List<Track> = candidates.sortedWith(
         compareByDescending<Track> { !local.album.isNullOrBlank() && PreferredLocalAudioMatcher.sameTitle(local.album, it.al.name) }
-            .thenByDescending { PreferredLocalAudioMatcher.sameTitle(local.title, it.name) }
+            .thenByDescending { PreferredLocalAudioMatcher.sameLocalTitle(onlineTitle = it.name, localTitle = local.title) }
             .thenBy { if (local.durationMs > 0L && it.dt > 0L) abs(local.durationMs - it.dt) else Long.MAX_VALUE }
     )
 

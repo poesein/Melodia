@@ -29,12 +29,19 @@ object PreferredLocalAudioMatcher {
 
     fun sameTitle(title: String, other: String): Boolean = normalize(title).isNotEmpty() && normalize(title) == normalize(other)
 
-    private fun sameAlbum(album: String?, other: String?): Boolean =
+    fun sameLocalTitle(onlineTitle: String, localTitle: String): Boolean = LocalMatchTitle.matches(onlineTitle, localTitle)
+
+    internal fun hasKnownArtist(value: String): Boolean {
+        val values = value.split(artistSeparator).map(::normalize)
+        return values.isNotEmpty() && values.all { it !in unknownArtists }
+    }
+
+    internal fun sameAlbum(album: String?, other: String?): Boolean =
         !album.isNullOrBlank() && !other.isNullOrBlank() && normalize(album) == normalize(other)
 
     fun sameMetadata(title: String, artist: String, candidate: LocalAudioCandidate, onlineAlbum: String? = null): Boolean {
         val names = artists(artist)
-        if (!sameTitle(title, candidate.title) || names.isEmpty() || hiddenVersion(candidate)) return false
+        if (!sameLocalTitle(title, candidate.title) || names.isEmpty() || hiddenVersion(candidate)) return false
         val localNames = artists(candidate.artist)
         if (names == localNames) return true
         // Some real tags serialize a verified multi-artist credit as A/B. A single
@@ -43,7 +50,7 @@ object PreferredLocalAudioMatcher {
             localNames.flatMap { it.split('/') }.map(::normalize).filter { it !in unknownArtists }.toSet() == names
     }
 
-    private fun hiddenVersion(candidate: LocalAudioCandidate): Boolean {
+    internal fun hiddenVersion(candidate: LocalAudioCandidate): Boolean {
         val fileName = candidate.fileName?.substringBeforeLast('.') ?: return false
         val nameWithoutArtist = fileName.replace(Regex("^${Regex.escape(candidate.artist)}\\s*[-_—]\\s*", RegexOption.IGNORE_CASE), "")
         val markers = Regex("(?i)\\b(live|remaster(?:ed)?|acoustic|instrumental|karaoke|remix|demo)\\b|现场|重制|重录|伴奏|不插电")
@@ -58,11 +65,16 @@ object PreferredLocalAudioMatcher {
         else -> 1
     }
 
+    internal fun matchingDuration(durationMs: Long, candidate: LocalAudioCandidate, onlineAlbum: String? = null): Boolean {
+        if (durationMs <= 0L || candidate.durationMs <= 0L) return false
+        val tolerance = if (sameAlbum(onlineAlbum, candidate.album)) (durationMs / 50L).coerceIn(2_000L, 5_000L) else 2_000L
+        return abs(candidate.durationMs - durationMs) <= tolerance
+    }
+
     fun uniqueMatch(title: String, artist: String, durationMs: Long, candidates: List<LocalAudioCandidate>, onlineAlbum: String? = null): String? {
         if (durationMs <= 0L) return null
         val matches = candidates.filter {
-            val tolerance = if (sameAlbum(onlineAlbum, it.album)) (durationMs / 50L).coerceIn(2_000L, 5_000L) else 2_000L
-            sameMetadata(title, artist, it, onlineAlbum) && it.durationMs > 0L && abs(it.durationMs - durationMs) <= tolerance
+            sameMetadata(title, artist, it, onlineAlbum) && matchingDuration(durationMs, it, onlineAlbum)
         }.distinctBy { it.identity ?: it.uri }
         if (matches.size == 1) return matches.single().uri
         if (matches.isEmpty() || matches.any { !sameAlbum(onlineAlbum, it.album) }) return null
