@@ -35,12 +35,15 @@ import com.lin0721.linmusic.core.ui.components.LoginBottomSheet
 import com.lin0721.linmusic.core.ui.components.WebViewLoginScreen
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.core.ui.theme.ScreenSlideDurationMs
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogViewModel
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogUiState
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
 fun ArtistScreen(
     artistId: Long,
     viewModel: ArtistViewModel = koinViewModel(),
+    catalogViewModel: ArtistCatalogViewModel = koinViewModel(),
     onBack: () -> Unit,
     onArtistClick: (Long) -> Unit,
     onPlaylistClick: (Long) -> Unit,
@@ -59,6 +62,12 @@ fun ArtistScreen(
     val albumMinTracks by viewModel.albumMinTracks.collectAsStateWithLifecycle()
     val albumDefaultMinTracks by viewModel.albumDefaultMinTracks.collectAsStateWithLifecycle()
     val albumMinTracksOverride by viewModel.albumMinTracksOverride.collectAsStateWithLifecycle()
+    val catalogState by catalogViewModel.state.collectAsStateWithLifecycle()
+
+    val artistState = uiState as? ArtistUiState.Success
+    LaunchedEffect(artistState?.artist, artistState?.albums) {
+        artistState?.let { catalogViewModel.updateArtistContext(it.artist, it.albums) }
+    }
 
     var showLoginSheet by remember { mutableStateOf(false) }
     var showWebViewLogin by remember { mutableStateOf(false) }
@@ -98,6 +107,8 @@ fun ArtistScreen(
             }
             is ArtistUiState.Success -> {
                 val blockedArtistIds by viewModel.blockedArtistIds.collectAsStateWithLifecycle()
+                val activeCatalogState = catalogState.takeIf { it.artistId == state.artist.id }
+                    ?: ArtistCatalogUiState(artistId = state.artist.id, query = state.artist.name)
                 ArtistContent(
                     artist = state.artist,
                     isFollowed = state.isFollowed,
@@ -112,6 +123,13 @@ fun ArtistScreen(
                     albumHasCustomMinimum = albumMinTracksOverride != null,
                     onAlbumMinTracksChanged = viewModel::updateAlbumMinTracks,
                     onResetAlbumMinTracks = viewModel::resetAlbumMinTracks,
+                    catalogState = activeCatalogState,
+                    onCatalogEnabledChanged = catalogViewModel::setEnabled,
+                    onCatalogQueryChanged = catalogViewModel::updateQuery,
+                    onCatalogSearch = catalogViewModel::searchArtists,
+                    onCatalogBind = catalogViewModel::bind,
+                    onCatalogChangeBinding = catalogViewModel::changeBinding,
+                    onCatalogRetry = catalogViewModel::retry,
                     similarArtists = state.similarArtists,
                     likedSongIds = likedSongIds,
                     blockedArtistIds = blockedArtistIds,

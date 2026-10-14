@@ -69,6 +69,8 @@ fun ArtistMoreMenuSheet(
     albumMinTracks: Int,
     albumHasCustomMinimum: Boolean,
     onChangeAlbumMinimum: () -> Unit,
+    catalogEnabled: Boolean,
+    onCatalogSettings: () -> Unit,
     onBlockClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -93,6 +95,25 @@ fun ArtistMoreMenuSheet(
                 fontWeight = FontWeight.ExtraBold,
                 modifier = Modifier.padding(bottom = MelodiaSpacing.md)
             )
+
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable {
+                    onDismiss()
+                    onCatalogSettings()
+                }.padding(vertical = MelodiaSpacing.sm),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Album, contentDescription = null,
+                    tint = if (catalogEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(MelodiaSpacing.md))
+                Column {
+                    Text("主要录音室专辑（资料库）", color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(if (catalogEnabled) "已开启 · MusicBrainz 分类，合并重复发行版" else "未开启 · 为此歌手单独设置",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth().clickable {

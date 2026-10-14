@@ -14,17 +14,36 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lin0721.linmusic.core.model.ArtistAlbum
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
+import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogSelection
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogUiState
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogStatus
 
 // 专辑 Tab: 采用精致的行模式展示，滚动到底自动追加下一页
 fun LazyListScope.artistAlbumTab(
     albums: List<ArtistAlbum>,
     minTracks: Int,
+    catalogState: ArtistCatalogUiState,
+    catalogSelection: ArtistCatalogSelection?,
+    onCatalogSettings: () -> Unit,
+    onCatalogRetry: () -> Unit,
+    onRestoreAll: () -> Unit,
     hasMore: Boolean,
     loadingMore: Boolean,
     loadError: String?,
     onRetry: () -> Unit,
     onAlbumClick: (Long) -> Unit
 ) {
+    if (catalogState.enabled) item(key = "artist_catalog_summary") {
+        Column(Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm)) {
+            Text("主要录音室专辑 · MusicBrainz", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+            ArtistCatalogStatus(catalogState, catalogSelection)
+            Row {
+                TextButton(onClick = onCatalogSettings) { Text("资料库设置") }
+                if (catalogState.error != null) TextButton(onClick = onCatalogRetry, enabled = !catalogState.loading) { Text("重试") }
+                TextButton(onClick = onRestoreAll, enabled = !catalogState.saving) { Text("恢复全部") }
+            }
+        }
+    }
     if (minTracks > 0) {
         item(key = "artist_album_filter_summary") {
             Text(
@@ -48,7 +67,8 @@ fun LazyListScope.artistAlbumTab(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    if (minTracks > 0) "暂无至少 $minTracks 首的专辑，可在歌手菜单调整曲数" else "暂无专辑",
+                    if (catalogSelection != null) "未识别到符合条件的主要录音室专辑，可恢复全部或检查资料库歌手。"
+                    else if (minTracks > 0) "暂无至少 $minTracks 首的专辑，可在歌手菜单调整曲数" else "暂无专辑",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp
                 )
@@ -69,7 +89,8 @@ fun LazyListScope.artistAlbumTab(
                 )
                 if (minTracks > 0 && albums.isEmpty()) {
                     Spacer(Modifier.width(MelodiaSpacing.sm))
-                    Text("继续查找符合曲数的专辑…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                    Text(if (catalogSelection != null) "继续查找主要录音室专辑…" else "继续查找符合曲数的专辑…",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 }
             }
         }
