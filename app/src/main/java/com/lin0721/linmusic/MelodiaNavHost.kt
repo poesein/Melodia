@@ -51,6 +51,7 @@ fun MelodiaNavHost(
     homeTab: Int,
     showMusicNewWorks: Boolean,
     searchAutoFocus: Boolean,
+    searchReturnsToOrigin: Boolean,
     onOpenSidebar: () -> Unit,
     onLoginScreenVisibilityChanged: (Boolean) -> Unit,
     onNavigateToPlaylist: (id: Long, isAlbum: Boolean) -> Unit,
@@ -65,6 +66,7 @@ fun MelodiaNavHost(
     onNavigateToLocalMusic: () -> Unit,
     onNavigateToScreen: (Screen) -> Unit,
     onOpenRecognition: () -> Unit,
+    onExitSearch: () -> Unit,
     onBack: () -> Unit
 ) {
     val localMusicNavigation = remember(onBack, onNavigateToScreen, onNavigateToArtist, onNavigateToPlaylist, onLoginScreenVisibilityChanged) {
@@ -162,7 +164,9 @@ fun MelodiaNavHost(
                         onArtistClick = onNavigateToArtist,
                         onRadioClick = onNavigateToRadio,
                         onPlaylistCategoryClick = onNavigateToPlaylistCategory,
-                        onOpenRecognition = onOpenRecognition
+                        onOpenRecognition = onOpenRecognition,
+                        exitReturnsToOrigin = searchReturnsToOrigin,
+                        onExitSearch = onExitSearch
                     )
                 }
                 is Screen.Library -> {

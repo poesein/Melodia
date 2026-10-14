@@ -10,6 +10,7 @@ import com.lin0721.linmusic.core.preferences.BottomBarLayout
 import com.lin0721.linmusic.core.preferences.SettingsPreferences
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
 import com.lin0721.linmusic.core.preferences.UiScale
+import com.lin0721.linmusic.core.preferences.ArtistAlbumFilterSettings
 import com.lin0721.linmusic.core.auth.UserPreferences
 import com.lin0721.linmusic.feature.settings.data.UserBindingItem
 import com.lin0721.linmusic.feature.settings.data.UserLevelData
@@ -135,6 +136,7 @@ class SettingsViewModel(
     val tabletImmersiveMode = settingsPreferences.tabletImmersiveMode.asState(false)
 
     val uiScalePercent = settingsPreferences.uiScalePercent.asState(UiScale.DEFAULT_PERCENT)
+    val artistAlbumMinTracks = settingsPreferences.artistAlbumMinTracks.asState(ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS)
 
     val lyricTextSize = settingsPreferences.lyricTextSize.asState(14)
 
@@ -386,6 +388,7 @@ class SettingsViewModel(
     fun updateTabletImmersiveMode(enabled: Boolean) = launchSave { settingsPreferences.saveTabletImmersiveMode(enabled) }
 
     fun updateUiScalePercent(percent: Int) = launchSave { settingsPreferences.saveUiScalePercent(percent) }
+    fun updateArtistAlbumMinTracks(minimum: Int) = launchSave { settingsPreferences.saveArtistAlbumMinTracks(minimum) }
 
     fun updateLyricTextSize(size: Int) = launchSave { settingsPreferences.saveLyricTextSize(size) }
 

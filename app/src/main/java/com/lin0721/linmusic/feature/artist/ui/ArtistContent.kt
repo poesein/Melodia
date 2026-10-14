@@ -28,6 +28,8 @@ import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.core.ui.components.PlaylistCollectItem
 import com.lin0721.linmusic.core.ui.components.PlaylistCollectSheet
 import com.lin0721.linmusic.core.ui.components.PlaylistCollectState
+import com.lin0721.linmusic.core.ui.components.ArtistAlbumMinimumDialog
+import com.lin0721.linmusic.feature.artist.domain.ArtistAlbumSelection
 import com.lin0721.linmusic.core.ui.components.SelectionAction
 import com.lin0721.linmusic.core.ui.components.TrackSelectionOverlay
 import com.lin0721.linmusic.core.ui.components.rememberSelectionBottomPadding
@@ -57,6 +59,12 @@ fun ArtistContent(
     albums: List<ArtistAlbum>,
     albumsHasMore: Boolean,
     albumsLoadingMore: Boolean,
+    albumsLoadError: String?,
+    albumMinTracks: Int,
+    albumDefaultMinTracks: Int,
+    albumHasCustomMinimum: Boolean,
+    onAlbumMinTracksChanged: (Int) -> Unit,
+    onResetAlbumMinTracks: () -> Unit,
     similarArtists: List<ArtistInfo>,
     likedSongIds: Set<Long>,
     blockedArtistIds: Set<Long>,
@@ -78,6 +86,7 @@ fun ArtistContent(
     onSaveNewCollection: (String, Long) -> Unit,
     onRequireLogin: () -> Unit,
     onLoadMoreAlbums: () -> Unit,
+    onRetryAlbums: () -> Unit,
     songSearch: ArtistSongSearchState,
     onSongSearchQueryChange: (String) -> Unit,
     onLoadMoreSongSearch: () -> Unit,
@@ -94,6 +103,10 @@ fun ArtistContent(
     val overlayHeight = 56.dp + melodiaStatusBarTopPadding()
 
     var showMoreMenuSheet by remember { mutableStateOf(false) }
+    var showAlbumMinimumDialog by remember { mutableStateOf(false) }
+    val visibleAlbums = remember(albums, albumMinTracks) {
+        ArtistAlbumSelection.visibleAlbums(albums, albumMinTracks)
+    }
 
     var dominantColor by remember { mutableStateOf(CoverPlaceholderDark) }
 
@@ -136,11 +149,16 @@ fun ArtistContent(
             total > 0 && lastVisible >= total - 5
         }
     }
-    LaunchedEffect(shouldLoadMore, selectedTab) {
-        if (!shouldLoadMore) return@LaunchedEffect
+    LaunchedEffect(shouldLoadMore, selectedTab, albums.size, albumsHasMore, albumsLoadingMore, albumsLoadError, albumMinTracks) {
         when (selectedTab) {
-            0 -> if (songSearch.active) onLoadMoreSongSearch()
-            1 -> onLoadMoreAlbums()
+            0 -> if (shouldLoadMore && songSearch.active) onLoadMoreSongSearch()
+            1 -> if (ArtistAlbumSelection.shouldLoadMore(
+                nearListEnd = shouldLoadMore,
+                visibleCount = visibleAlbums.size,
+                hasMore = albumsHasMore,
+                loading = albumsLoadingMore,
+                error = albumsLoadError
+            )) onLoadMoreAlbums()
         }
     }
 
@@ -246,8 +264,12 @@ fun ArtistContent(
                         onRequireLogin = onRequireLogin
                     )
                     1 -> artistAlbumTab(
-                        albums = albums,
+                        albums = visibleAlbums,
+                        minTracks = albumMinTracks,
+                        hasMore = albumsHasMore,
                         loadingMore = albumsLoadingMore,
+                        loadError = albumsLoadError,
+                        onRetry = onRetryAlbums,
                         onAlbumClick = onAlbumClick
                     )
                     2 -> artistAboutTab(
@@ -339,8 +361,21 @@ fun ArtistContent(
         if (showMoreMenuSheet) {
             ArtistMoreMenuSheet(
                 isBlocked = blockedArtistIds.contains(artist.id),
+                albumMinTracks = albumMinTracks,
+                albumHasCustomMinimum = albumHasCustomMinimum,
+                onChangeAlbumMinimum = { showAlbumMinimumDialog = true },
                 onBlockClick = onBlockClick,
                 onDismiss = { showMoreMenuSheet = false }
+            )
+        }
+        if (showAlbumMinimumDialog) {
+            ArtistAlbumMinimumDialog(
+                currentMinimum = albumMinTracks,
+                description = "仅为 ${artist.name} 设置，0 首显示全部。其他歌手不受影响；默认 $albumDefaultMinTracks 首。",
+                onSave = onAlbumMinTracksChanged,
+                onUseDefault = if (albumHasCustomMinimum) onResetAlbumMinTracks else null,
+                defaultMinimum = albumDefaultMinTracks,
+                onDismiss = { showAlbumMinimumDialog = false }
             )
         }
     }

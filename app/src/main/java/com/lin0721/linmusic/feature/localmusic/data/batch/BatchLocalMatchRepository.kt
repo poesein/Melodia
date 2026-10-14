@@ -20,7 +20,8 @@ import kotlinx.coroutines.sync.withLock
 class BatchLocalMatchRepository(
     private val context: Context,
     private val preferredAudio: PreferredLocalAudioRepository,
-    private val search: SearchRepository
+    private val search: SearchRepository,
+    private val covers: LocalMatchCoverRepository
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val store = BatchLocalMatchStore(context)
@@ -40,15 +41,15 @@ class BatchLocalMatchRepository(
             commandMutex.withLock {
                 if (pausing || runningJob?.isActive == true) return@withLock
                 refreshRows()
-                // Retrying an error requires this explicit user action; no automatic retry loop.
+                // One user-started pass revisits unresolved rows, then stops. Confirmed sources stay intact.
                 storeMutex.withLock {
-                    val rows = state.value.rows.map { if (it.status == BatchLocalMatchStatus.ERROR)
-                        it.copy(status = BatchLocalMatchStatus.PENDING, reason = "等待重试", updatedAtMs = now()) else it }
+                    val rows = state.value.rows.map { if (BatchMatchRetryPolicy.shouldRetryOnStart(it.status) && it.status != BatchLocalMatchStatus.PENDING)
+                        it.copy(status = BatchLocalMatchStatus.PENDING, reason = "等待重新匹配", updatedAtMs = now()) else it }
                     rows.filter { it.status == BatchLocalMatchStatus.PENDING }.forEach(store::writeRow)
                     mutableState.update { it.copy(rows = rows) }
                 }
                 if (state.value.rows.none { it.status == BatchLocalMatchStatus.PENDING }) {
-                    setRunState(false, "当前没有待处理歌曲；可重新检查未匹配项，或扫描后再开始")
+                    setRunState(false, "已匹配的歌曲均已保留；扫描新歌曲后可继续匹配")
                     return@withLock
                 }
                 setRunState(true, null)
@@ -70,24 +71,7 @@ class BatchLocalMatchRepository(
         }
     }
 
-    fun retryUnmatched() {
-        scope.launch {
-            commandMutex.withLock {
-                if (runningJob?.isActive == true) return@withLock
-                refreshRows()
-                storeMutex.withLock {
-                    val rows = state.value.rows.map { row ->
-                        if (row.status in setOf(BatchLocalMatchStatus.NO_MATCH, BatchLocalMatchStatus.NEEDS_CONFIRMATION,
-                                BatchLocalMatchStatus.ERROR)) row.copy(status = BatchLocalMatchStatus.PENDING,
-                            matchedTrack = null, candidates = emptyList(), reason = "等待重新检查", updatedAtMs = now()) else row
-                    }
-                    store.replaceLibrary(rows)
-                    mutableState.update { it.copy(rows = rows, message = null) }
-                }
-            }
-            startOrResume()
-        }
-    }
+    fun retryUnmatched() = startOrResume()
 
     private suspend fun refreshRows() {
         mutableState.update { it.copy(isLoading = true) }
@@ -104,12 +88,18 @@ class BatchLocalMatchRepository(
                         val old = saved[track.uri.toString()]
                         val query = queryFor(track)
                         val linked = track.songId?.let(confirmed::get)
+                        val existing = if (linked == null) old?.matchedTrack?.id?.let(confirmed::get)?.takeIf {
+                            BatchOnlineMatchPolicy.evaluate(candidateFor(track), listOf(it)).status == BatchOnlineMatchStatus.MATCHED
+                        }?.let { preferredAudio.confirmedPlayableTrack(it.id) } else null
                         when {
                             linked != null -> BatchLocalMatchRow(track, query,
                                 if (old?.status == BatchLocalMatchStatus.MATCHED && old.matchedTrack?.id == linked.id)
                                     BatchLocalMatchStatus.MATCHED else BatchLocalMatchStatus.ALREADY_LINKED,
                                 linked, listOf(linked), old?.reason?.takeIf { old.matchedTrack?.id == linked.id }
                                     ?: "已有关联，跳过网络查询", old?.updatedAtMs ?: now())
+                            existing != null -> BatchLocalMatchRow(track, query, BatchLocalMatchStatus.ALREADY_LINKED,
+                                existing, listOf(existing), "同一歌曲已匹配，沿用已有优先音源", old?.updatedAtMs ?: now(),
+                                usesExistingSource = true)
                             old == null -> BatchLocalMatchRow(track, query)
                             old.status == BatchLocalMatchStatus.MATCHED || old.status == BatchLocalMatchStatus.ALREADY_LINKED ->
                                 BatchLocalMatchRow(track, query, BatchLocalMatchStatus.NEEDS_CONFIRMATION,
@@ -140,7 +130,7 @@ class BatchLocalMatchRepository(
                 process = { row: BatchLocalMatchRow -> processRow(row, queryCache) },
                 commit = ::commitRow
             ).run()
-            setRunState(false, halted ?: "匹配完成；未匹配或需确认的歌曲可逐首手动关联")
+            setRunState(false, halted ?: "本轮匹配完成；可直接处理剩余候选，或点击继续重新匹配未成功项")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -160,20 +150,24 @@ class BatchLocalMatchRepository(
                 reason = "文件不可读取或音频信息不完整，请检查授权并重新扫描", updatedAtMs = now()))
         val candidate = LocalAudioCandidate(inspected.uri, inspected.title, inspected.artist, inspected.durationMs,
             inspected.identity, inspected.album, inspected.fileName)
-        val query = queryFor(local.copy(title = inspected.title, artist = inspected.artist))
-        if (LocalMatchTitle.forSearch(inspected.title).isBlank()) return BatchRunnerStep(row.copy(query = query,
+        val resolved = LocalMatchMetadata.resolve(candidate)
+        val query = queryForCandidate(candidate)
+        if (resolved.title.isBlank()) return BatchRunnerStep(row.copy(query = query,
             status = BatchLocalMatchStatus.NEEDS_CONFIRMATION, reason = "缺少歌名，需要手动关联", updatedAtMs = now()))
-        if (!PreferredLocalAudioMatcher.hasKnownArtist(inspected.artist) ||
+        if (!PreferredLocalAudioMatcher.hasKnownArtist(resolved.artist) ||
             inspected.album?.trim()?.lowercase(Locale.ROOT).orEmpty() in unknownAlbums) return BatchRunnerStep(row.copy(query = query,
             status = BatchLocalMatchStatus.NEEDS_CONFIRMATION,
             reason = "缺少完整歌手或专辑标签，无法安全自动关联；请手动核对", updatedAtMs = now()))
         if (PreferredLocalAudioMatcher.hiddenVersion(candidate)) return BatchRunnerStep(row.copy(query = query,
             status = BatchLocalMatchStatus.NEEDS_CONFIRMATION,
             reason = "文件名含有标签未注明的版本信息，请手动确认", updatedAtMs = now()))
-        val confirmed = preferredAudio.confirmedTracksForTitle(candidate.title)
+        val confirmed = preferredAudio.confirmedTracksForCandidate(candidate)
         val evidence = try {
             batchMatchEvidence(candidate, confirmed) {
-                cache[query] ?: withTimeout(20_000L) {
+                // A previous report may become decisive under newer matching rules. Reuse it before searching.
+                val previous = BatchOnlineMatchPolicy.evaluate(candidate, row.candidates)
+                if (previous.status == BatchOnlineMatchStatus.MATCHED) BatchSearchPage(row.candidates, false)
+                else cache[query] ?: withTimeout(20_000L) {
                     val response = search.search(query, SearchType.SONG, offset = 0, limit = 100).first().getOrThrow()
                     BatchSearchPage(response.items.filterIsInstance<SearchResultItem.SongItem>().map { it.track }, !response.hasMore)
                 }.also {
@@ -193,19 +187,27 @@ class BatchLocalMatchRepository(
             val actual = preferredAudio.confirmedForLocalTrack(local)
             if (actual != null) return BatchRunnerStep(row.copy(query = query, status = BatchLocalMatchStatus.ALREADY_LINKED,
                 matchedTrack = actual, candidates = listOf(actual), reason = "此文件已有关联，跳过网络查询", updatedAtMs = now()))
+            val existing = known.matchedTrack?.let { preferredAudio.confirmedPlayableTrack(it.id) }
+            if (existing != null) {
+                val enriched = covers.fillCovers(listOf(existing)).first()
+                preferredAudio.cacheConfirmedCovers(listOf(enriched))
+                return BatchRunnerStep(row.copy(query = query, status = BatchLocalMatchStatus.ALREADY_LINKED,
+                    matchedTrack = enriched, candidates = listOf(enriched), usesExistingSource = true,
+                    reason = "同一歌曲已匹配，沿用已有优先音源", updatedAtMs = now()))
+            }
             return BatchRunnerStep(row.copy(query = query, status = BatchLocalMatchStatus.NEEDS_CONFIRMATION,
-                candidates = known.candidates.take(20), reason = if (known.status == BatchOnlineMatchStatus.MATCHED)
-                    "同一网易云歌曲已关联其他本地文件或编码，保留已有来源；如需更换请手动确认"
-                    else "多条已确认关联符合本地标签，请手动核对歌曲 ID；已有来源均已保留", updatedAtMs = now()))
+                candidates = covers.fillCovers(known.candidates.take(20)),
+                reason = "已有优先音源不可读取，请核对授权或选择本地文件重新关联", updatedAtMs = now()))
         }
         val page = (evidence as BatchMatchEvidence.Search).page
         val decision = BatchOnlineMatchPolicy.evaluate(candidate, page.tracks)
+        val withCovers = covers.fillCovers(decision.candidates.take(20))
         if (decision.status != BatchOnlineMatchStatus.MATCHED) return BatchRunnerStep(row.copy(query = query,
             status = if (page.tracks.isEmpty()) BatchLocalMatchStatus.NO_MATCH else BatchLocalMatchStatus.NEEDS_CONFIRMATION,
-            candidates = decision.candidates.take(20), reason = decision.reason, updatedAtMs = now()))
+            candidates = withCovers, reason = decision.reason, updatedAtMs = now()))
         // Broad search pagination also contains covers and unrelated versions. Decide from the
         // retrieved candidates' complete metadata rather than treating hasMore as ambiguity.
-        val matched = decision.matchedTrack!!
+        val matched = withCovers.firstOrNull { it.id == decision.matchedTrack!!.id } ?: decision.matchedTrack!!
         val result = preferredAudio.linkBatchMatch(local, candidate, matched)
         val status = when (result.status) {
             BatchAssociationSaveStatus.SAVED -> BatchLocalMatchStatus.MATCHED
@@ -215,8 +217,8 @@ class BatchLocalMatchRepository(
         }
         return BatchRunnerStep(row.copy(query = query, status = status,
             matchedTrack = matched.takeIf { status == BatchLocalMatchStatus.MATCHED || status == BatchLocalMatchStatus.ALREADY_LINKED },
-            candidates = decision.candidates.take(20), reason = if (result.status == BatchAssociationSaveStatus.SAVED)
-                "检索结果内唯一严格匹配，已建立关联" else result.reason, updatedAtMs = now()))
+            candidates = withCovers, usesExistingSource = false, reason = if (result.status == BatchAssociationSaveStatus.SAVED)
+                decision.reason + "，已建立关联" else result.reason, updatedAtMs = now()))
     }
 
     private suspend fun commitRow(row: BatchLocalMatchRow) {
@@ -226,15 +228,23 @@ class BatchLocalMatchRepository(
             // wins over an older search outcome, both in the visible report and in its stored row.
             val linked = preferredAudio.confirmedForLocalTrack(row.local)
             val latest = state.value.rows.first { it.local.uri == row.local.uri }
+            val existing = if (row.usesExistingSource) row.matchedTrack?.id?.let {
+                preferredAudio.confirmedPlayableTrack(it)
+            }?.takeIf { BatchOnlineMatchPolicy.evaluate(candidateFor(row.local), listOf(it)).status == BatchOnlineMatchStatus.MATCHED }
+                else null
             val reconciled = when {
                 linked != null -> row.copy(local = row.local.copy(songId = linked.id), matchedTrack = linked, candidates = listOf(linked),
+                    usesExistingSource = false,
                     status = if ((row.status == BatchLocalMatchStatus.MATCHED && row.matchedTrack?.id == linked.id) ||
                         (latest.status == BatchLocalMatchStatus.MATCHED && latest.matchedTrack?.id == linked.id))
                         BatchLocalMatchStatus.MATCHED else BatchLocalMatchStatus.ALREADY_LINKED,
                     reason = if (row.status == BatchLocalMatchStatus.MATCHED && row.matchedTrack?.id == linked.id)
                         row.reason else "当前已有关联，已保留用户确认的歌曲 ID ${linked.id}")
+                existing != null -> row.copy(status = BatchLocalMatchStatus.ALREADY_LINKED,
+                    matchedTrack = existing, candidates = listOf(existing), usesExistingSource = true,
+                    reason = "同一歌曲已匹配，沿用已有优先音源")
                 row.status == BatchLocalMatchStatus.MATCHED || row.status == BatchLocalMatchStatus.ALREADY_LINKED ->
-                    row.copy(status = BatchLocalMatchStatus.NEEDS_CONFIRMATION, matchedTrack = null,
+                    row.copy(status = BatchLocalMatchStatus.NEEDS_CONFIRMATION, matchedTrack = null, usesExistingSource = false,
                         reason = "匹配期间关联已被解除或发生变化，请手动核对")
                 else -> row
             }
@@ -264,9 +274,13 @@ class BatchLocalMatchRepository(
         else -> "搜索失败：${error.message.orEmpty().take(160).ifBlank { "未知网络错误" }}"
     }
 
-    private fun queryFor(track: LocalTrack): String {
-        val title = LocalMatchTitle.forSearch(track.title)
-        val artist = track.artist.trim().takeUnless { it.lowercase(Locale.ROOT) in unknownArtists }
+    private fun queryFor(track: LocalTrack): String = queryForCandidate(candidateFor(track))
+    private fun candidateFor(track: LocalTrack) = LocalAudioCandidate(track.uri.toString(), track.title, track.artist,
+        track.durationMs, album = track.album, fileName = track.path?.substringAfterLast('/'))
+    private fun queryForCandidate(candidate: LocalAudioCandidate): String {
+        val resolved = LocalMatchMetadata.resolve(candidate)
+        val title = LocalMatchTitle.forSearch(resolved.title)
+        val artist = resolved.artist.trim().takeUnless { it.lowercase(Locale.ROOT) in unknownArtists }
         return listOfNotNull(title, artist).filter(String::isNotBlank).joinToString(" ")
     }
     private fun sameLibraryEvidence(a: LocalTrack, b: LocalTrack): Boolean = a.title == b.title && a.artist == b.artist &&

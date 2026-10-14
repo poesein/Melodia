@@ -56,6 +56,9 @@ fun ArtistScreen(
     val songSearch by viewModel.songSearch.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val importState by viewModel.importState.collectAsStateWithLifecycle()
+    val albumMinTracks by viewModel.albumMinTracks.collectAsStateWithLifecycle()
+    val albumDefaultMinTracks by viewModel.albumDefaultMinTracks.collectAsStateWithLifecycle()
+    val albumMinTracksOverride by viewModel.albumMinTracksOverride.collectAsStateWithLifecycle()
 
     var showLoginSheet by remember { mutableStateOf(false) }
     var showWebViewLogin by remember { mutableStateOf(false) }
@@ -103,6 +106,12 @@ fun ArtistScreen(
                     albums = state.albums,
                     albumsHasMore = state.albumsHasMore,
                     albumsLoadingMore = state.albumsLoadingMore,
+                    albumsLoadError = state.albumsLoadError,
+                    albumMinTracks = albumMinTracks,
+                    albumDefaultMinTracks = albumDefaultMinTracks,
+                    albumHasCustomMinimum = albumMinTracksOverride != null,
+                    onAlbumMinTracksChanged = viewModel::updateAlbumMinTracks,
+                    onResetAlbumMinTracks = viewModel::resetAlbumMinTracks,
                     similarArtists = state.similarArtists,
                     likedSongIds = likedSongIds,
                     blockedArtistIds = blockedArtistIds,
@@ -138,6 +147,7 @@ fun ArtistScreen(
                         showLoginSheet = true
                     },
                     onLoadMoreAlbums = { viewModel.loadMoreAlbums() },
+                    onRetryAlbums = { viewModel.loadMoreAlbums(retry = true) },
                     songSearch = songSearch,
                     onSongSearchQueryChange = viewModel::updateSongSearchQuery,
                     onLoadMoreSongSearch = viewModel::loadMoreSongSearch,

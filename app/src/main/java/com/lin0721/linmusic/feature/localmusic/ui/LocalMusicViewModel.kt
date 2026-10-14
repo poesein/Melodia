@@ -20,6 +20,7 @@ import com.lin0721.linmusic.feature.player.data.PlayerRepository
 import com.lin0721.linmusic.feature.localmusic.data.LocalLibraryRepository
 import com.lin0721.linmusic.feature.localmusic.data.LocalPlaylistRepository
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
+import com.lin0721.linmusic.feature.localmusic.data.batch.LocalMatchCoverRepository
 import com.lin0721.linmusic.feature.localmusic.data.scan.ImportResult
 import com.lin0721.linmusic.feature.localmusic.domain.LocalLibraryIndex
 import com.lin0721.linmusic.feature.localmusic.domain.LocalPlaylist
@@ -29,6 +30,9 @@ import com.lin0721.linmusic.feature.localmusic.domain.buildLocalLibraryIndex
 import com.lin0721.linmusic.feature.localmusic.domain.queueSongId
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
 import com.lin0721.linmusic.feature.localmusic.domain.LocalMatchTitle
+import com.lin0721.linmusic.feature.localmusic.domain.LocalMatchMetadata
+import com.lin0721.linmusic.feature.localmusic.domain.LocalAudioCandidate
+import com.lin0721.linmusic.feature.localmusic.domain.BatchOnlineMatchPolicy
 import com.lin0721.linmusic.feature.localmusic.domain.PreferredLocalAudioMatcher
 import com.lin0721.linmusic.feature.playlist.domain.SongCollectDelegate
 import com.lin0721.linmusic.feature.search.data.SearchRepository
@@ -53,7 +57,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 // 本地曲目操作菜单状态
 sealed class LocalMusicMenuState {
@@ -121,6 +124,8 @@ data class LocalOnlineAssociationState(
     val hasMore: Boolean = false
 )
 
+data class LocalAssociationCompletion(val localUri: String, val sequence: Long)
+
 class LocalMusicViewModel(
     private val repository: LocalLibraryRepository,
     private val playlistRepository: LocalPlaylistRepository,
@@ -133,6 +138,7 @@ class LocalMusicViewModel(
     private val resourceProvider: ResourceProvider,
     private val preferredAudio: PreferredLocalAudioRepository,
     private val searchRepository: SearchRepository,
+    private val matchCovers: LocalMatchCoverRepository,
     userPreferences: UserPreferences
 ) : ViewModel() {
 
@@ -148,6 +154,10 @@ class LocalMusicViewModel(
     private val _onlineAssociation = MutableStateFlow<LocalOnlineAssociationState?>(null)
     val onlineAssociation: StateFlow<LocalOnlineAssociationState?> = _onlineAssociation.asStateFlow()
     private var associationSearchJob: Job? = null
+    private val _associationSavingUri = MutableStateFlow<String?>(null)
+    val associationSavingUri: StateFlow<String?> = _associationSavingUri.asStateFlow()
+    private val _associationCompletion = MutableStateFlow<LocalAssociationCompletion?>(null)
+    val associationCompletion: StateFlow<LocalAssociationCompletion?> = _associationCompletion.asStateFlow()
 
     // 曲库索引只随曲目列表变化重建，菜单/多选等界面状态变化不触发
     val library: StateFlow<LocalLibraryIndex> = _uiState
@@ -343,11 +353,12 @@ class LocalMusicViewModel(
     }
 
     fun openOnlineAssociation(track: LocalTrack, initialCandidates: List<Track> = emptyList()) {
-        if (track.source == LocalTrackSource.MELODIA_DOWNLOAD) return
+        if (track.source == LocalTrackSource.MELODIA_DOWNLOAD || _associationSavingUri.value != null) return
         closeTrackMenu()
         associationSearchJob?.cancel()
-        val artist = track.artist.takeUnless { it.isBlank() || it == "未知艺术家" || it == "<unknown>" }.orEmpty()
-        val query = "${LocalMatchTitle.forSearch(track.title)} $artist".trim()
+        val metadata = matchMetadata(track)
+        val artist = metadata.artist.takeIf(PreferredLocalAudioMatcher::hasKnownArtist).orEmpty()
+        val query = "${LocalMatchTitle.forSearch(metadata.title)} $artist".trim()
         val candidates = initialCandidates.filter { it.id > 0L }.distinctBy { it.id }
         _onlineAssociation.value = LocalOnlineAssociationState(
             track = track,
@@ -356,6 +367,13 @@ class LocalMusicViewModel(
             searchedQuery = if (candidates.isNotEmpty()) query else ""
         )
         if (candidates.isEmpty()) searchOnlineAssociation()
+        else associationSearchJob = viewModelScope.launch {
+            val covered = matchCovers.fillCovers(candidates)
+            val current = _onlineAssociation.value ?: return@launch
+            if (current.track.uri == track.uri && current.query == query && !current.saving) {
+                _onlineAssociation.value = current.copy(results = rankAssociationCandidates(covered, track))
+            }
+        }
     }
 
     fun closeOnlineAssociation() {
@@ -386,13 +404,22 @@ class LocalMusicViewModel(
                     val current = _onlineAssociation.value ?: return@collect
                     if (current.track.uri != state.track.uri || current.searchedQuery != query) return@collect
                     result.onSuccess { page ->
-                        val songs = page.items.filterIsInstance<SearchResultItem.SongItem>().map { it.track }.filter { it.id > 0L }
+                        val songs = page.items.filterIsInstance<SearchResultItem.SongItem>()
+                            .map { it.track }.filter { it.id > 0L }
+                        // Make the candidates usable immediately; cover loading does not delay a choice.
                         _onlineAssociation.value = current.copy(
                             searching = false,
                             results = rankAssociationCandidates((if (loadMore) current.results + songs else songs).distinctBy { it.id }, current.track),
                             nextOffset = offset + page.rawFetchedCount,
                             hasMore = page.hasMore && page.rawFetchedCount > 0,
                             error = null
+                        )
+                        val covers = matchCovers.fillCovers(songs).associateBy { it.id }
+                        // A cover request may finish after the user changed the query or started saving.
+                        val latest = _onlineAssociation.value ?: return@onSuccess
+                        if (latest.track.uri != state.track.uri || latest.searchedQuery != query || latest.saving) return@onSuccess
+                        _onlineAssociation.value = latest.copy(
+                            results = latest.results.map { covers[it.id] ?: it }
                         )
                     }.onFailure { error ->
                         _onlineAssociation.value = current.copy(searching = false, error = error.toUserMessage(resourceProvider))
@@ -408,28 +435,52 @@ class LocalMusicViewModel(
         }
     }
 
-    private fun rankAssociationCandidates(candidates: List<Track>, local: LocalTrack): List<Track> = candidates.sortedWith(
-        compareByDescending<Track> { !local.album.isNullOrBlank() && PreferredLocalAudioMatcher.sameTitle(local.album, it.al.name) }
-            .thenByDescending { PreferredLocalAudioMatcher.sameLocalTitle(onlineTitle = it.name, localTitle = local.title) }
-            .thenBy { if (local.durationMs > 0L && it.dt > 0L) abs(local.durationMs - it.dt) else Long.MAX_VALUE }
-    )
+    private fun matchMetadata(local: LocalTrack): LocalAudioCandidate = LocalMatchMetadata.resolve(
+        LocalAudioCandidate(local.uri.toString(), local.title, local.artist, local.durationMs,
+            album = local.album, fileName = local.path?.substringAfterLast('/')?.substringAfterLast('\\')))
+
+    private fun rankAssociationCandidates(candidates: List<Track>, local: LocalTrack): List<Track> {
+        return BatchOnlineMatchPolicy.rankCandidates(matchMetadata(local), candidates)
+    }
 
     fun confirmOnlineAssociation(onlineTrack: Track) {
         val state = _onlineAssociation.value ?: return
-        if (state.saving) return
-        _onlineAssociation.value = state.copy(saving = true, error = null)
+        linkOnlineAssociation(state.track, onlineTrack)
+    }
+
+    /** A visible candidate tap is an explicit user choice, including replacing a previous link. */
+    fun linkOnlineAssociation(track: LocalTrack, onlineTrack: Track, onLinked: () -> Unit = {}) {
+        if (track.source == LocalTrackSource.MELODIA_DOWNLOAD || _associationSavingUri.value != null) return
+        _associationSavingUri.value = track.uri.toString()
+        _onlineAssociation.value = _onlineAssociation.value?.let { state ->
+            if (state.track.uri == track.uri) state.copy(saving = true, error = null) else state
+        }
+        associationSearchJob?.cancel()
         viewModelScope.launch {
-            val linked = preferredAudio.linkLocalTrack(state.track, onlineTrack)
-            if (linked) {
-                associationSearchJob?.cancel()
-                _onlineAssociation.value = null
-                _toastEvent.emit(if (preferredAudio.enabled.first()) "已关联「${onlineTrack.name}」，在线歌曲将优先使用此本地文件"
-                    else "已关联；请在播放与下载设置中开启「优先使用本地音频」")
-            } else {
-                _onlineAssociation.value = _onlineAssociation.value?.copy(saving = false, error = "本地音频无法读取，请检查文件与访问权限后重试")
-                _toastEvent.emit("关联失败：本地音频无法读取")
+            try {
+                if (preferredAudio.linkLocalTrack(track, onlineTrack)) {
+                    _associationCompletion.value = LocalAssociationCompletion(track.uri.toString(),
+                        (_associationCompletion.value?.sequence ?: 0L) + 1L)
+                    if (_onlineAssociation.value?.track?.uri == track.uri) _onlineAssociation.value = null
+                    onLinked()
+                    _toastEvent.emit(if (preferredAudio.enabled.first()) "已关联「${onlineTrack.name}」"
+                        else "已关联；请在播放与下载设置中开启「优先使用本地音频」")
+                } else {
+                    failOnlineAssociation(track, "本地音频无法读取，请检查文件与访问权限后重试")
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                failOnlineAssociation(track, error.toUserMessage(resourceProvider))
+            } finally {
+                _associationSavingUri.value = null
             }
         }
+    }
+
+    private suspend fun failOnlineAssociation(track: LocalTrack, message: String) {
+        val current = _onlineAssociation.value
+        if (current?.track?.uri == track.uri) _onlineAssociation.value = current.copy(saving = false, error = message)
+        _toastEvent.emit("关联失败：$message")
     }
 
     fun unlinkOnlineAssociation(track: LocalTrack) {

@@ -107,6 +107,86 @@ class PreferredLocalAudioTest {
         assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "陈奕迅 • eason and the duo band", 180_000L, listOf(duet)))
     }
 
+    @Test fun combinedLocalTitlesAndPartialCollaborationCreditsMatchInForwardPlayback() {
+        val local = studio.copy(title = "01 Artist - Song", album = "Album", fileName = "01 Artist - Song.flac")
+        assertEquals(local.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist • Guest", 180_000L, listOf(local), "Album"))
+        assertEquals(local.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(local.copy(title = "Song - Artist")), "Album"))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Other • Guest", 180_000L, listOf(local), "Album"))
+    }
+
+    @Test fun filenameMetadataFallbackWorksInForwardPlaybackAndKeepsBandSlashLiteral() {
+        val unknown = studio.copy(title = "01 Artist - Song", artist = "<unknown>", album = "Album", fileName = "01 Artist - Song.mp3")
+        assertEquals(unknown.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(unknown), "Album"))
+        val band = studio.copy(artist = "AC/DC", album = "Album")
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "AC • DC", 180_000L, listOf(band), "Album"))
+    }
+
+    @Test fun olderScannerArtistWithTrackIndexAlsoMatchesDuringForwardPlayback() {
+        val older = studio.copy(artist = "01 Artist", album = "Album", fileName = "01 Artist - Song.flac")
+        assertEquals(older.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(older), "Album"))
+        assertEquals(older.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "01 Artist", 180_000L, listOf(older), "Album"))
+    }
+
+    @Test fun equivalentRegionalAlbumFilesCanChooseTheBestReadableEncoding() {
+        val mp3 = studio.copy(album = "Album (Japan Edition)", fileName = "Artist - Song.mp3")
+        val flac = mp3.copy(uri = "content://lossless", album = "Album (Remastered)", fileName = "Artist - Song.flac")
+        assertEquals(flac.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(mp3, flac), "Album"))
+        val original = mp3.copy(uri = "content://original", album = "Album")
+        assertEquals(original.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(original, flac), "Album"))
+    }
+
+    @Test fun verifiedAlbumCopiesTakePriorityOverAnotherAlbumWithoutChangingItsCoreName() {
+        val target = studio.copy(album = "Album (US Edition)", fileName = "song.flac")
+        val unrelated = studio.copy(uri = "content://other", album = "Other Album", fileName = "song.flac")
+        assertEquals(target.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(unrelated, target), "Album"))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 184_000L, listOf(target.copy(durationMs = 180_000L)), "Album"))
+    }
+
+    @Test fun filenameReleaseAnnotationsDoNotBlockButRecordingAnnotationsStillDo() {
+        val release = studio.copy(album = "Album (Remastered)", fileName = "Artist - Song (2011 Remastered).flac")
+        assertEquals(release.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(release), "Album"))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L,
+            listOf(release.copy(fileName = "Artist - Song (Live).flac")), "Album"))
+    }
+
+    @Test fun filenameRecordingVenueYearAndRemixCreditMustNotDisappearBehindAGenericTag() {
+        listOf(
+            "Song (Live)" to "Artist - Song (Live at Tokyo).flac",
+            "Song (Live)" to "Artist - Song - Live at Tokyo.flac",
+            "Song (Live)" to "Artist - Song (Live) (Tokyo).flac",
+            "Song (Live)" to "Artist - Song (Live at Tokyo (Japan Edition)).flac",
+            "Song (重录)" to "Artist - Song (2020 重录版).flac",
+            "Song (Remix)" to "Artist - Song (DJ Example Remix).flac",
+            "Song (Live at London)" to "Artist - Song (Live at Tokyo).flac"
+        ).forEach { (title, filename) ->
+            val recording = studio.copy(title = title, album = "Album", fileName = filename)
+            assertNull(filename, PreferredLocalAudioMatcher.uniqueMatch(title, "Artist", 180_000L, listOf(recording), "Album"))
+        }
+    }
+
+    @Test fun completeRecordingTagsCanBeMoreSpecificThanTheFilenameAndReleaseLabelsAreAllowed() {
+        val recording = studio.copy(title = "Song (Live at Tokyo)", album = "Album", fileName = "Artist - Song (Live).flac")
+        assertEquals(recording.uri, PreferredLocalAudioMatcher.uniqueMatch(recording.title, "Artist", 180_000L, listOf(recording), "Album"))
+        listOf("Artist - Song (Live at Tokyo) (2011 Remastered).flac",
+            "Artist - Song (Live at Tokyo - Japan Edition).flac").forEach { filename ->
+            assertEquals(recording.uri, PreferredLocalAudioMatcher.uniqueMatch(recording.title, "Artist", 180_000L,
+                listOf(recording.copy(fileName = filename)), "Album"))
+        }
+        val generic = recording.copy(title = "Song (Live)", fileName = "Artist - Song (Live (2011 Remastered)).flac")
+        assertEquals(generic.uri, PreferredLocalAudioMatcher.uniqueMatch(generic.title, "Artist", 180_000L, listOf(generic), "Album"))
+    }
+
+    @Test fun recordingWordsInsideASongTitleAreNotVersionSuffixes() {
+        val song = studio.copy(title = "Live and Let Die", album = "Album", fileName = "Artist - Live and Let Die.flac")
+        assertEquals(song.uri, PreferredLocalAudioMatcher.uniqueMatch(song.title, "Artist", 180_000L, listOf(song), "Album"))
+        assertEquals(song.uri, PreferredLocalAudioMatcher.uniqueMatch(song.title, "Artist", 180_000L,
+            listOf(song.copy(fileName = "Artist - Live and Let Die (Japan Edition).flac")), "Album"))
+        listOf("Artist - Song-Live.flac", "Artist - Song (Re-recorded 2020).flac").forEach { filename ->
+            assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L,
+                listOf(studio.copy(album = "Album", fileName = filename)), "Album"))
+        }
+    }
+
     @Test fun manualChoiceHasPriorityAndDoesNotRunAutoMatching() = runBlocking {
         assertEquals("content://manual", resolvePreferredLocalAudio(true, "content://manual", true,
             automaticUri = { error("Manual choice must win") }, isReadable = { true }))

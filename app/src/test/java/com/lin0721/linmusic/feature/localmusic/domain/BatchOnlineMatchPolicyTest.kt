@@ -23,7 +23,7 @@ class BatchOnlineMatchPolicyTest {
 
     @Test fun incompleteLocalMetadataCannotCreateAnAutomaticAssociation() {
         listOf(
-            local.copy(title = ""), local.copy(artist = ""), local.copy(artist = "未知歌手"),
+            local.copy(title = "", fileName = null), local.copy(artist = ""), local.copy(artist = "未知歌手"),
             local.copy(artist = "Artist, <unknown>"), local.copy(album = null),
             local.copy(album = "Unknown Album"), local.copy(durationMs = 0L)
         ).forEach { incomplete ->
@@ -70,12 +70,12 @@ class BatchOnlineMatchPolicyTest {
         assertEquals(BatchOnlineMatchStatus.NO_MATCH, BatchOnlineMatchPolicy.evaluate(band, listOf(online.copy(ar = listOf(Artist(name = "AC"))))).status)
     }
 
-    @Test fun severalStrongOnlineIdsRemainAmbiguous() {
+    @Test fun severalEquivalentOnlineIdsSelectAStableBestMatch() {
         val alternate = online.copy(id = 101L)
         val decision = BatchOnlineMatchPolicy.evaluate(local, listOf(online, alternate))
-        assertEquals(BatchOnlineMatchStatus.NEEDS_CONFIRMATION, decision.status)
+        assertEquals(BatchOnlineMatchStatus.MATCHED, decision.status)
         assertEquals(listOf(online, alternate), decision.candidates)
-        assertNull(decision.matchedTrack)
+        assertSame(online, decision.matchedTrack)
     }
 
     @Test fun repeatedSearchPagesForTheSameSongAreNotAmbiguous() {
@@ -107,5 +107,67 @@ class BatchOnlineMatchPolicyTest {
             BatchOnlineMatchPolicy.evaluate(local.copy(artist = "GAI"), listOf(online.copy(ar = listOf(Artist(name = "GAI周延"))))).status)
         assertEquals(BatchOnlineMatchStatus.NO_MATCH,
             BatchOnlineMatchPolicy.evaluate(local.copy(title = "五味瓶"), listOf(online.copy(name = "01 五味瓶"))).status)
+    }
+
+    @Test fun numberedArtistTitleAndTitleArtistFormsUseOneResolver() {
+        listOf("01 Artist - 五味瓶", "01 五味瓶 - Artist", "Artist—五味瓶", "五味瓶_Artist").forEach {
+            assertSame(online, BatchOnlineMatchPolicy.evaluate(local.copy(title = it), listOf(online)).matchedTrack)
+        }
+        val unknown = local.copy(title = "01 Artist - 五味瓶", artist = "<unknown>", fileName = "01 Artist - 五味瓶.flac")
+        assertSame(online, BatchOnlineMatchPolicy.evaluate(unknown, listOf(online)).matchedTrack)
+    }
+
+    @Test fun deliberatelyReducedLocalArtistCreditsAreAcceptedButUnsharedArtistsAreNot() {
+        val collaboration = online.copy(ar = listOf(Artist(name = "Artist"), Artist(name = "Guest")))
+        assertSame(collaboration, BatchOnlineMatchPolicy.evaluate(local, listOf(collaboration)).matchedTrack)
+        assertEquals(BatchOnlineMatchStatus.NO_MATCH,
+            BatchOnlineMatchPolicy.evaluate(local.copy(artist = "Unrelated"), listOf(collaboration)).status)
+        assertEquals(BatchOnlineMatchStatus.NO_MATCH,
+            BatchOnlineMatchPolicy.evaluate(local.copy(artist = "Artist, Another Guest"), listOf(collaboration)).status)
+    }
+
+    @Test fun regionalAndRemasteredAlbumEditionsAreEquivalentWithinBoundedDurationTolerance() {
+        listOf("Album (Japan Edition)", "Album [US Edition]", "Album - 2011 Remastered", "Album (重制版)", "Album (欧版)").forEach { album ->
+            val edition = online.copy(al = Album(name = album), dt = 182_500L)
+            assertSame(edition, BatchOnlineMatchPolicy.evaluate(local, listOf(edition)).matchedTrack)
+        }
+        assertEquals(BatchOnlineMatchStatus.NO_MATCH,
+            BatchOnlineMatchPolicy.evaluate(local, listOf(online.copy(al = Album(name = "Other Album (Japan Edition)")))).status)
+        assertEquals(BatchOnlineMatchStatus.NO_MATCH,
+            BatchOnlineMatchPolicy.evaluate(local, listOf(online.copy(al = Album(name = "Album (Live)")))).status)
+    }
+
+    @Test fun bestEquivalentIdPrefersExactAlbumThenCompleteCreditThenClosestDuration() {
+        val exact = online.copy(id = 500L, dt = 181_500L)
+        val regionalCloser = online.copy(id = 1L, al = Album(name = "Album (Japan Edition)"), dt = 180_000L)
+        assertSame(exact, BatchOnlineMatchPolicy.evaluate(local, listOf(regionalCloser, exact)).matchedTrack)
+        val duetCloser = online.copy(id = 2L, ar = listOf(Artist(name = "Artist"), Artist(name = "Guest")), dt = 180_000L)
+        assertSame(exact, BatchOnlineMatchPolicy.evaluate(local, listOf(duetCloser, exact)).matchedTrack)
+        val closest = online.copy(id = 700L, dt = 180_001L)
+        assertSame(closest, BatchOnlineMatchPolicy.evaluate(local, listOf(exact, closest)).matchedTrack)
+        val same = closest.copy(id = 701L)
+        assertSame(closest, BatchOnlineMatchPolicy.evaluate(local, listOf(same, closest)).matchedTrack)
+    }
+
+    @Test fun aStudioAndLiveSearchResultNeverBecomeEquivalentBecauseOfReleaseAnnotations() {
+        val live = online.copy(id = 1L, name = "五味瓶 (Live)", al = Album(name = "Album (Japan Edition)"))
+        assertSame(online, BatchOnlineMatchPolicy.evaluate(local, listOf(live, online)).matchedTrack)
+        assertEquals(BatchOnlineMatchStatus.NO_MATCH,
+            BatchOnlineMatchPolicy.evaluate(local.copy(fileName = "Artist - 五味瓶 (Live).flac"), listOf(online)).status)
+    }
+
+    @Test fun aGenuineNumberedCatalogTitleWinsOverTheStrippedAlternative() {
+        val originalTitle = online.copy(id = 500L, name = "01 五味瓶")
+        val strippedTitle = online.copy(id = 1L)
+        assertSame(originalTitle, BatchOnlineMatchPolicy.evaluate(local, listOf(strippedTitle, originalTitle)).matchedTrack)
+        val creditTitle = local.copy(title = "01 Artist - 五味瓶")
+        assertSame(strippedTitle, BatchOnlineMatchPolicy.evaluate(creditTitle, listOf(originalTitle, strippedTitle)).matchedTrack)
+    }
+
+    @Test fun olderScannerFallbackArtistIncludesTheIndexButCanStillMatchTheCorrectArtist() {
+        val older = local.copy(title = "五味瓶", artist = "01 Artist", fileName = "01 Artist - 五味瓶.flac")
+        assertSame(online, BatchOnlineMatchPolicy.evaluate(older, listOf(online)).matchedTrack)
+        val numericArtist = online.copy(ar = listOf(Artist(name = "01 Artist")))
+        assertSame(numericArtist, BatchOnlineMatchPolicy.evaluate(older, listOf(numericArtist)).matchedTrack)
     }
 }

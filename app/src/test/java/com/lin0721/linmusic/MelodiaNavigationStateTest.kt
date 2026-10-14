@@ -494,4 +494,135 @@ class MelodiaNavigationStateTest {
         restored.openTab(Screen.Music)
         assertTrue(restored.currentEntry.id > 70L)
     }
+
+    @Test
+    fun `音乐搜索退出回到原音乐帧并保留最新选择`() = inSnapshot {
+        val nav = MelodiaNavigationState()
+        nav.openTab(Screen.Music)
+        nav.updateShowMusicNewWorks(true)
+        val musicEntry = nav.currentEntry
+
+        nav.openSearch(autoFocus = true)
+        assertTrue(nav.canReturnFromSearch)
+        assertTrue(nav.returnFromSearch())
+
+        assertEquals(musicEntry, nav.currentEntry)
+        assertTrue(nav.showMusicNewWorks)
+        assertFalse(nav.searchAutoFocus)
+        assertFalse(nav.canReturnFromSearch)
+        assertFalse(nav.returnFromSearch())
+    }
+
+    @Test
+    fun `音乐搜索结果打开详情后先返回搜索再回音乐`() = inSnapshot {
+        val nav = MelodiaNavigationState()
+        nav.openTab(Screen.Music)
+        val musicEntry = nav.currentEntry
+        nav.openSearch(autoFocus = true)
+        val searchEntry = nav.currentEntry
+        nav.openArtist(42L)
+
+        assertFalse(nav.canReturnFromSearch)
+        assertFalse(nav.returnFromSearch())
+        nav.navigateBack()
+        assertEquals(searchEntry, nav.currentEntry)
+        assertTrue(nav.canReturnFromSearch)
+        nav.navigateBack()
+        assertEquals(musicEntry, nav.currentEntry)
+    }
+
+    @Test
+    fun `底栏搜索主动进入后不会继承音乐搜索返回目标`() = inSnapshot {
+        val nav = MelodiaNavigationState()
+        nav.openTab(Screen.Music)
+        nav.openSearch(autoFocus = true)
+        nav.openTab(Screen.Search)
+
+        assertEquals(Screen.Search, nav.currentScreen)
+        assertFalse(nav.canReturnFromSearch)
+        assertFalse(nav.returnFromSearch())
+        nav.navigateBack()
+        assertEquals(Screen.Home, nav.currentScreen)
+    }
+
+    @Test
+    fun `离开搜索切其他底栏不会留下未来的音乐返回目标`() = inSnapshot {
+        val nav = MelodiaNavigationState()
+        nav.openTab(Screen.Music)
+        nav.openSearch(autoFocus = true)
+        nav.navigateTo(Screen.Library)
+        nav.openSearch(autoFocus = true)
+
+        assertFalse(nav.canReturnFromSearch)
+        nav.navigateBack()
+        assertEquals(Screen.Home, nav.currentScreen)
+    }
+
+    @Test
+    fun `重复音乐搜索往返和重复入口不会污染下一次独立搜索`() = inSnapshot {
+        val nav = MelodiaNavigationState()
+        nav.openTab(Screen.Music)
+        val musicEntry = nav.currentEntry
+        repeat(3) {
+            nav.openSearch(autoFocus = true)
+            nav.openSearch(autoFocus = true)
+            assertTrue(nav.returnFromSearch())
+            assertEquals(musicEntry, nav.currentEntry)
+        }
+        nav.openTab(Screen.Search)
+        nav.openSearch(autoFocus = true)
+        assertFalse(nav.canReturnFromSearch)
+    }
+
+    @Test
+    fun `搜索是默认根页时音乐搜索仍然可以返回原音乐现场`() = inSnapshot {
+        val nav = MelodiaNavigationState()
+        nav.updateDefaultRootTab(Screen.Search)
+        nav.openTab(Screen.Music)
+        nav.openSearch(autoFocus = true)
+        assertTrue(nav.canGoBackToHomeAll)
+
+        nav.navigateBack()
+        assertEquals(Screen.Music, nav.currentScreen)
+    }
+
+    @Test
+    fun `搜索来源经过进程快照恢复且保留音乐帧ID和最新`() = inSnapshot {
+        val nav = MelodiaNavigationState()
+        nav.openTab(Screen.Music)
+        nav.updateShowMusicNewWorks(true)
+        val musicEntry = nav.currentEntry
+        nav.openSearch(autoFocus = true)
+        nav.openPlaylist(88L, true)
+        val encoded = Json.encodeToString(NavigationSnapshot.serializer(), nav.toSnapshot())
+        val restored = restoreNavigationSnapshot(Json.decodeFromString(NavigationSnapshot.serializer(), encoded))
+
+        assertEquals(Screen.Playlist(88L, true), restored.currentScreen)
+        restored.navigateBack()
+        assertTrue(restored.canReturnFromSearch)
+        restored.navigateBack()
+        assertEquals(musicEntry, restored.currentEntry)
+        assertTrue(restored.showMusicNewWorks)
+    }
+
+    @Test
+    fun `旧快照和无效搜索来源按独立搜索原规则恢复`() = inSnapshot {
+        val legacy = restoreNavigationSnapshot(NavigationSnapshot(activeTabScreen = Screen.Search))
+        assertFalse(legacy.canReturnFromSearch)
+        legacy.navigateBack()
+        assertEquals(Screen.Home, legacy.currentScreen)
+
+        val stale = restoreNavigationSnapshot(NavigationSnapshot(
+            activeTabScreen = Screen.Library,
+            searchReturnTab = Screen.Music
+        ))
+        stale.openSearch(autoFocus = true)
+        assertFalse(stale.canReturnFromSearch)
+
+        val invalid = restoreNavigationSnapshot(NavigationSnapshot(
+            activeTabScreen = Screen.Search,
+            searchReturnTab = Screen.Home
+        ))
+        assertFalse(invalid.canReturnFromSearch)
+    }
 }

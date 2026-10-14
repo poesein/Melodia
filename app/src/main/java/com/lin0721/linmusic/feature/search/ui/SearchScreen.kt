@@ -52,7 +52,9 @@ fun SearchScreen(
     onArtistClick: (id: Long) -> Unit = {},
     onRadioClick: (id: Long) -> Unit = {},
     onPlaylistCategoryClick: (category: String) -> Unit = {},
-    onOpenRecognition: () -> Unit = {}
+    onOpenRecognition: () -> Unit = {},
+    exitReturnsToOrigin: Boolean = false,
+    onExitSearch: () -> Unit = {}
 ) {
     val discoveryState by viewModel.discoveryState.collectAsStateWithLifecycle()
     val featuredTrack by viewModel.featuredTrack.collectAsStateWithLifecycle()
@@ -93,10 +95,16 @@ fun SearchScreen(
         }
     }
 
-    // 搜索态是页面内部状态，不在导航栈里；返回手势先回发现页，而不是被外层全局 BackHandler 接住退回首页。
-    // 全屏播放器/侧边栏/创建菜单开着时要让位，否则会抢先吞掉本该用来关浮层的返回事件
-    BackHandler(enabled = mode != SearchMode.Discovery && !LocalGlobalOverlayOpen.current) {
+    fun exitSearch() {
+        focusManager.clearFocus()
         viewModel.cancelSearch()
+        if (exitReturnsToOrigin) onExitSearch()
+    }
+
+    // 独立搜索入口先返回发现页；从音乐页进入的搜索则一次退回原音乐现场。
+    // 全屏播放器/侧边栏/创建菜单开着时要让位，否则会抢先吞掉本该用来关浮层的返回事件
+    BackHandler(enabled = (mode != SearchMode.Discovery || exitReturnsToOrigin) && !LocalGlobalOverlayOpen.current) {
+        exitSearch()
     }
 
     // 网易返回的真实推荐词，仅用于兜底触发搜索；未成功加载时为 null，不能拿占位文案当关键词去搜
@@ -131,7 +139,7 @@ fun SearchScreen(
             },
             onActivate = viewModel::activateSearch,
             onFieldFocused = viewModel::editQuery,
-            onCancel = viewModel::cancelSearch,
+            onCancel = ::exitSearch,
             onOpenSidebar = onOpenSidebar,
             onAvatarClickLoggedOut = { ToastManager.showToast("请先在主页登录以显示侧边栏哦！") },
             onOpenRecognition = onOpenRecognition

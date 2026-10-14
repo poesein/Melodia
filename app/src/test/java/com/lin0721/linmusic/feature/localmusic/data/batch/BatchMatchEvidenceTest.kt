@@ -21,11 +21,13 @@ class BatchMatchEvidenceTest {
         assertEquals(0, calls)
         assertEquals(10L, (result as BatchMatchEvidence.Confirmed).decision.matchedTrack?.id)
     }
-    @Test fun ambiguousConfirmedIdsRequireConfirmationWithoutCallingNetwork() = runTest {
+    @Test fun equivalentConfirmedIdsSelectTheStableBestWithoutCallingNetwork() = runTest {
         var calls = 0
         val result = batchMatchEvidence(local, listOf(known, known.copy(id = 11))) { calls++; BatchSearchPage(emptyList(), true) }
         assertEquals(0, calls)
-        assertEquals(BatchOnlineMatchStatus.NEEDS_CONFIRMATION, (result as BatchMatchEvidence.Confirmed).decision.status)
+        val decision = (result as BatchMatchEvidence.Confirmed).decision
+        assertEquals(BatchOnlineMatchStatus.MATCHED, decision.status)
+        assertEquals(10L, decision.matchedTrack?.id)
     }
     @Test fun albumMismatchCannotSuppressAnActualSearch() = runTest {
         var calls = 0

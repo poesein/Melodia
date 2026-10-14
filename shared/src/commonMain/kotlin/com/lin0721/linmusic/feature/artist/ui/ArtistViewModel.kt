@@ -20,6 +20,9 @@ import com.lin0721.linmusic.core.ui.components.PlaylistCollectItem
 import com.lin0721.linmusic.core.network.AppString
 import com.lin0721.linmusic.core.network.ResourceProvider
 import com.lin0721.linmusic.core.network.toUserMessage
+import com.lin0721.linmusic.core.preferences.ArtistAlbumFilterSettings
+import com.lin0721.linmusic.core.preferences.SettingsPreferences
+import com.lin0721.linmusic.feature.artist.domain.ArtistAlbumSelection
 import com.lin0721.linmusic.feature.playlist.domain.TrackBatchActionsDelegate
 import com.lin0721.linmusic.feature.playlist.presentation.TrackSelection
 import com.lin0721.linmusic.feature.playlist.ui.PlaylistImportState
@@ -28,6 +31,7 @@ import com.lin0721.linmusic.feature.search.domain.SearchResultItem
 import com.lin0721.linmusic.feature.search.domain.SearchType
 import com.lin0721.linmusic.feature.create.data.playlistPrivacyOf
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -49,11 +53,35 @@ class ArtistViewModel(
     private val userPreferences: UserPreferences,
     private val resourceProvider: ResourceProvider,
     private val searchRepository: SearchRepository,
-    private val trackBatchActions: TrackBatchActionsDelegate
+    private val trackBatchActions: TrackBatchActionsDelegate,
+    private val settingsPreferences: SettingsPreferences
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ArtistUiState>(ArtistUiState.Loading)
     val uiState: StateFlow<ArtistUiState> = _uiState.asStateFlow()
+    private val albumFilterArtistId = MutableStateFlow(0L)
+
+    val albumDefaultMinTracks = settingsPreferences.artistAlbumMinTracks.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS
+    )
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val albumOverrideFlow = albumFilterArtistId.flatMapLatest(settingsPreferences::artistAlbumMinTracksOverride)
+    val albumMinTracksOverride = albumOverrideFlow.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), null
+    )
+    val albumMinTracks = combine(settingsPreferences.artistAlbumMinTracks, albumOverrideFlow) { default, override ->
+        override ?: default
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS)
+
+    fun updateAlbumMinTracks(minimum: Int) {
+        val artistId = currentArtistId
+        if (artistId > 0) viewModelScope.launch { settingsPreferences.saveArtistAlbumMinTracksOverride(artistId, minimum) }
+    }
+
+    fun resetAlbumMinTracks() {
+        val artistId = currentArtistId
+        if (artistId > 0) viewModelScope.launch { settingsPreferences.clearArtistAlbumMinTracksOverride(artistId) }
+    }
 
     private val _toastEvent = MutableSharedFlow<String>()
     val toastEvent: SharedFlow<String> = _toastEvent.asSharedFlow()
@@ -86,6 +114,7 @@ class ArtistViewModel(
     // 各分页区块当前已加载的偏移量，随 loadArtistData 重新加载而重置
     private var currentArtistId: Long = 0
     private var albumOffset = 0
+    private var albumsLoadJob: Job? = null
     private var allSongsOffset = 0
 
     init {
@@ -105,11 +134,13 @@ class ArtistViewModel(
     }
 
     fun loadArtistData(artistId: Long) {
+        albumsLoadJob?.cancel()
         if (currentArtistId != artistId) {
             resetSongSearch()
             _selection.value = TrackSelection()
         }
         currentArtistId = artistId
+        albumFilterArtistId.value = artistId
         albumOffset = 0
         allSongsOffset = 0
         _uiState.value = ArtistUiState.Loading
@@ -146,8 +177,9 @@ class ArtistViewModel(
                         fansCount = fans,
                         topSongs = topSongs,
                         albums = albumsPage?.albums ?: emptyList(),
-                        albumsHasMore = albumsPage?.hasMore ?: false,
-                        similarArtists = similar
+                        albumsHasMore = albumsPage?.let(ArtistAlbumSelection::hasNextPage) ?: albumsResult.isFailure,
+                        similarArtists = similar,
+                        albumsLoadError = albumsResult.exceptionOrNull()?.toUserMessage(resourceProvider)
                     )
                 } else {
                     val err = (detailResult.exceptionOrNull() ?: topSongsResult.exceptionOrNull())
@@ -163,26 +195,31 @@ class ArtistViewModel(
     }
 
     // 专辑 Tab 滚动到底追加下一页
-    fun loadMoreAlbums() {
+    fun loadMoreAlbums(retry: Boolean = false) {
         val state = _uiState.value as? ArtistUiState.Success ?: return
-        if (!state.albumsHasMore || state.albumsLoadingMore) return
-        _uiState.value = state.copy(albumsLoadingMore = true)
-        viewModelScope.launch {
-            artistRepository.getArtistAlbums(currentArtistId, limit = ALBUMS_PAGE_SIZE, offset = albumOffset)
+        if (!state.albumsHasMore || state.albumsLoadingMore || (state.albumsLoadError != null && !retry)) return
+        val artistId = currentArtistId
+        val requestedOffset = albumOffset
+        _uiState.value = state.copy(albumsLoadingMore = true, albumsLoadError = null)
+        albumsLoadJob = viewModelScope.launch {
+            artistRepository.getArtistAlbums(artistId, limit = ALBUMS_PAGE_SIZE, offset = requestedOffset)
                 .first()
                 .onSuccess { page ->
-                    albumOffset += page.albums.size
+                    if (currentArtistId != artistId) return@onSuccess
+                    albumOffset = requestedOffset + page.albums.size
                     val latest = _uiState.value as? ArtistUiState.Success ?: return@onSuccess
                     _uiState.value = latest.copy(
-                        albums = latest.albums + page.albums,
-                        albumsHasMore = page.hasMore,
-                        albumsLoadingMore = false
+                        albums = (latest.albums + page.albums).distinctBy { it.id },
+                        albumsHasMore = ArtistAlbumSelection.hasNextPage(page),
+                        albumsLoadingMore = false,
+                        albumsLoadError = null
                     )
                 }
                 .onFailure { e ->
-                    AppLogger.w(TAG, "加载更多专辑失败 artistId=$currentArtistId", e)
+                    if (currentArtistId != artistId) return@onFailure
+                    AppLogger.w(TAG, "加载更多专辑失败 artistId=$artistId", e)
                     val latest = _uiState.value as? ArtistUiState.Success ?: return@onFailure
-                    _uiState.value = latest.copy(albumsLoadingMore = false)
+                    _uiState.value = latest.copy(albumsLoadingMore = false, albumsLoadError = e.toUserMessage(resourceProvider))
                 }
         }
     }

@@ -11,7 +11,8 @@ data class BatchLocalMatchRow(
     val matchedTrack: Track? = null,
     val candidates: List<Track> = emptyList(),
     val reason: String = "",
-    val updatedAtMs: Long = 0L
+    val updatedAtMs: Long = 0L,
+    val usesExistingSource: Boolean = false
 )
 
 data class BatchLocalMatchState(

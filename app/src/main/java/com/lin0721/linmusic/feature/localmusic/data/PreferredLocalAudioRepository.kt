@@ -55,6 +55,8 @@ class PreferredLocalAudioRepository(
     private fun titleKey(songId: Long) = stringPreferencesKey("song_title_$songId")
     private fun artistKey(songId: Long) = stringPreferencesKey("song_artist_$songId")
     private fun albumKey(songId: Long) = stringPreferencesKey("song_album_$songId")
+    private fun albumCoverKey(songId: Long) = stringPreferencesKey("song_album_cover_$songId")
+    private fun albumIdKey(songId: Long) = longPreferencesKey("song_album_id_$songId")
     private fun localTitleKey(songId: Long) = stringPreferencesKey("linked_file_title_$songId")
     private fun localSnapshotKey(songId: Long) = stringPreferencesKey("linked_file_metadata_$songId")
     private val snapshotJson = Json { ignoreUnknownKeys = true }
@@ -111,6 +113,8 @@ class PreferredLocalAudioRepository(
                     it[titleKey(songId)] = value.name
                     it[artistKey(songId)] = value.ar.joinToString(" • ") { artist -> artist.name }
                     it[albumKey(songId)] = value.al.name
+                    value.al.picUrl.takeIf(String::isNotBlank)?.let { cover -> it[albumCoverKey(songId)] = cover }
+                    if (value.al.id > 0L) it[albumIdKey(songId)] = value.al.id
                     if (value.dt > 0L) it[durationKey(songId)] = value.dt
                 }
                 it[excludedKey] = it[excludedKey].orEmpty() - songId.toString()
@@ -147,6 +151,8 @@ class PreferredLocalAudioRepository(
                 prefs[titleKey(onlineTrack.id)] = onlineTrack.name
                 prefs[artistKey(onlineTrack.id)] = onlineTrack.ar.joinToString(" • ") { it.name }
                 prefs[albumKey(onlineTrack.id)] = onlineTrack.al.name
+                onlineTrack.al.picUrl.takeIf(String::isNotBlank)?.let { prefs[albumCoverKey(onlineTrack.id)] = it }
+                if (onlineTrack.al.id > 0L) prefs[albumIdKey(onlineTrack.id)] = onlineTrack.al.id
                 prefs.remove(localSnapshotKey(onlineTrack.id))
                 snapshot?.let { prefs[localSnapshotKey(onlineTrack.id)] = snapshotJson.encodeToString(it) }
                 if (onlineTrack.dt > 0L) prefs[durationKey(onlineTrack.id)] = onlineTrack.dt
@@ -206,6 +212,8 @@ class PreferredLocalAudioRepository(
             prefs[titleKey(onlineTrack.id)] = onlineTrack.name
             prefs[artistKey(onlineTrack.id)] = onlineTrack.ar.joinToString(" • ") { it.name }
             prefs[albumKey(onlineTrack.id)] = onlineTrack.al.name
+            onlineTrack.al.picUrl.takeIf(String::isNotBlank)?.let { prefs[albumCoverKey(onlineTrack.id)] = it }
+            if (onlineTrack.al.id > 0L) prefs[albumIdKey(onlineTrack.id)] = onlineTrack.al.id
             prefs[durationKey(onlineTrack.id)] = onlineTrack.dt
             result = BatchAssociationSaveResult(BatchAssociationSaveStatus.SAVED, "唯一严格匹配，已建立关联")
         }
@@ -215,6 +223,12 @@ class PreferredLocalAudioRepository(
     suspend fun confirmedTrack(songId: Long): Track? = withContext(Dispatchers.IO) {
         val prefs = context.preferredLocalAudioDataStore.data.first()
         if (prefs[linkKey(songId)] == null) null else cachedTrack(prefs, songId)
+    }
+
+    suspend fun confirmedPlayableTrack(songId: Long): Track? = withContext(Dispatchers.IO) {
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        val uri = prefs[linkKey(songId)] ?: return@withContext null
+        if (isReadable(uri)) cachedTrack(prefs, songId) else null
     }
 
     suspend fun confirmedTracks(): Map<Long, Track> = withContext(Dispatchers.IO) {
@@ -250,13 +264,34 @@ class PreferredLocalAudioRepository(
         }.map { cachedTrack(prefs, it) }
     }
 
+    suspend fun confirmedTracksForCandidate(local: LocalAudioCandidate): List<Track> = withContext(Dispatchers.IO) {
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        val resolvedTitle = com.lin0721.linmusic.feature.localmusic.domain.LocalMatchMetadata.resolve(local).title
+        storedLinks(prefs).keys.filter { songId ->
+            val title = prefs[titleKey(songId)].orEmpty()
+            PreferredLocalAudioMatcher.sameLocalTitle(title, local.title) || PreferredLocalAudioMatcher.sameLocalTitle(title, resolvedTitle)
+        }.map { cachedTrack(prefs, it) }
+    }
+
     private fun cachedTrack(prefs: Preferences, songId: Long) = Track(
             id = songId,
             name = prefs[titleKey(songId)].orEmpty(),
             ar = prefs[artistKey(songId)]?.split(" • ")?.map { com.lin0721.linmusic.core.model.Artist(name = it) }.orEmpty(),
-            al = com.lin0721.linmusic.core.model.Album(name = prefs[albumKey(songId)].orEmpty()),
+            al = com.lin0721.linmusic.core.model.Album(id = prefs[albumIdKey(songId)] ?: 0L,
+                name = prefs[albumKey(songId)].orEmpty(), picUrl = prefs[albumCoverKey(songId)].orEmpty()),
             dt = prefs[durationKey(songId)] ?: 0L
     )
+
+    /** Artwork may be filled later without changing a confirmed recording or any playback preference. */
+    suspend fun cacheConfirmedCovers(tracks: List<Track>) {
+        if (tracks.none { it.al.picUrl.isNotBlank() }) return
+        context.preferredLocalAudioDataStore.edit { prefs ->
+            tracks.filter { prefs[linkKey(it.id)] != null && it.al.picUrl.isNotBlank() }.forEach {
+                if (prefs[albumCoverKey(it.id)] != it.al.picUrl) prefs[albumCoverKey(it.id)] = it.al.picUrl
+                if (it.al.id > 0L) prefs[albumIdKey(it.id)] = it.al.id
+            }
+        }
+    }
 
     suspend fun unlink(songId: Long) {
         context.preferredLocalAudioDataStore.edit {
@@ -289,7 +324,9 @@ class PreferredLocalAudioRepository(
             automaticEnabled = (prefs[automaticKey] ?: true) && songId.toString() !in prefs[excludedKey].orEmpty(),
             automaticUri = {
                 val candidates = readableLocalAudioCandidates(context, library.tracks.first().filter {
-                    it.source != LocalTrackSource.MELODIA_DOWNLOAD && PreferredLocalAudioMatcher.sameLocalTitle(title, it.title)
+                    it.source != LocalTrackSource.MELODIA_DOWNLOAD && PreferredLocalAudioMatcher.sameCandidateTitle(title,
+                        LocalAudioCandidate(it.uri.toString(), it.title, it.artist, it.durationMs, album = it.album,
+                            fileName = it.path?.substringAfterLast('/')))
                 })
                 if (candidates.isEmpty()) null else {
                     val cachedDuration = prefs[durationKey(songId)]
@@ -324,7 +361,8 @@ class PreferredLocalAudioRepository(
         val candidates = if (prefs[automaticKey] != false && cachedTitles.isNotEmpty()) {
             readableLocalAudioCandidates(context, library.tracks.first().filter { track ->
                 track.source != LocalTrackSource.MELODIA_DOWNLOAD && cachedTitles.any {
-                    PreferredLocalAudioMatcher.sameLocalTitle(it, track.title)
+                    PreferredLocalAudioMatcher.sameCandidateTitle(it, LocalAudioCandidate(track.uri.toString(),
+                        track.title, track.artist, track.durationMs, album = track.album, fileName = track.path?.substringAfterLast('/')))
                 }
             })
         } else emptyList()

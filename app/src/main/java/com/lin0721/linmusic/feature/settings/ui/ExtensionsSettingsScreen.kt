@@ -25,6 +25,7 @@ import com.lin0721.linmusic.core.preferences.SettingsPreferences
 import com.lin0721.linmusic.core.preferences.UiScale
 import com.lin0721.linmusic.feature.player.ui.LyricCapsuleSlider
 import com.lin0721.linmusic.core.ui.components.MelodiaDragHandle
+import com.lin0721.linmusic.core.ui.components.ArtistAlbumMinimumDialog
 import com.lin0721.linmusic.core.ui.theme.BottomSheetShape
 import com.lin0721.linmusic.core.ui.theme.LocalMelodiaWindowSizeClass
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
@@ -48,10 +49,12 @@ fun ExtensionsSettingsView(viewModel: SettingsViewModel) {
     val sidePlayerPinned by viewModel.sidePlayerPinned.collectAsStateWithLifecycle()
     val tabletImmersiveMode by viewModel.tabletImmersiveMode.collectAsStateWithLifecycle()
     val uiScalePercent by viewModel.uiScalePercent.collectAsStateWithLifecycle()
+    val artistAlbumMinTracks by viewModel.artistAlbumMinTracks.collectAsStateWithLifecycle()
     val isExpanded = LocalMelodiaWindowSizeClass.current == MelodiaWindowSizeClass.Expanded
 
     var showBottomBarSheet by remember { mutableStateOf(false) }
     var showPlayerModeSheet by remember { mutableStateOf(false) }
+    var showAlbumMinimumDialog by remember { mutableStateOf(false) }
     val playerModeLabel = PlayerPageModes.firstOrNull { it.first == playerPageMode }?.second ?: "自动"
     val playerModeSubtitle = when (playerPageMode) {
         SettingsPreferences.PLAYER_PAGE_MODE_FULLSCREEN -> "全屏式：点击展开，返回直接收起"
@@ -177,8 +180,24 @@ fun ExtensionsSettingsView(viewModel: SettingsViewModel) {
                     }
                 }
             }
+            item {
+                SettingsGroupCard(SettingsSubMenu.EXTENSIONS.sectionTitles[5]) {
+                    SettingsRow(
+                        title = "默认专辑最少曲数",
+                        subtitle = if (artistAlbumMinTracks == 0) "0 首显示全部；歌手菜单可单独设置" else "至少 $artistAlbumMinTracks 首；已单独设置的歌手不受影响",
+                        onClick = { showAlbumMinimumDialog = true }
+                    )
+                }
+            }
         }
 
+        if (showAlbumMinimumDialog) {
+            ArtistAlbumMinimumDialog(
+                currentMinimum = artistAlbumMinTracks,
+                onSave = viewModel::updateArtistAlbumMinTracks,
+                onDismiss = { showAlbumMinimumDialog = false }
+            )
+        }
         if (showPlayerModeSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showPlayerModeSheet = false },

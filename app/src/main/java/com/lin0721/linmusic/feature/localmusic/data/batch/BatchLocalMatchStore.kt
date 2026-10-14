@@ -27,7 +27,7 @@ internal class BatchLocalMatchStore(context: Context) : SQLiteOpenHelper(context
                 val local = json.decodeFromString<PersistedLocal>(cursor.getString(cursor.getColumnIndexOrThrow("local_json")))
                 val result = json.decodeFromString<PersistedResult>(cursor.getString(cursor.getColumnIndexOrThrow("result_json")))
                 add(BatchLocalMatchRow(local.toTrack(), result.query, result.status, result.matchedTrack,
-                    result.candidates, result.reason, result.updatedAtMs))
+                    result.candidates, result.reason, result.updatedAtMs, result.usesExistingSource))
             }
         }
     }
@@ -51,7 +51,7 @@ internal class BatchLocalMatchStore(context: Context) : SQLiteOpenHelper(context
             put("uri", row.local.uri.toString())
             put("local_json", json.encodeToString(PersistedLocal.from(row.local)))
             put("result_json", json.encodeToString(PersistedResult(row.query, row.status, row.matchedTrack,
-                row.candidates, row.reason, row.updatedAtMs)))
+                row.candidates, row.reason, row.updatedAtMs, row.usesExistingSource)))
         }
         check(writableDatabase.insertWithOnConflict("results", null, values, SQLiteDatabase.CONFLICT_REPLACE) >= 0L) {
             "无法保存匹配结果，任务已暂停"
@@ -75,7 +75,8 @@ internal class BatchLocalMatchStore(context: Context) : SQLiteOpenHelper(context
         val matchedTrack: Track? = null,
         val candidates: List<Track> = emptyList(),
         val reason: String = "",
-        val updatedAtMs: Long = 0L
+        val updatedAtMs: Long = 0L,
+        val usesExistingSource: Boolean = false
     )
     @Serializable private data class PersistedLocal(
         val mediaStoreId: Long, val songId: Long?, val title: String, val artist: String, val album: String?,
