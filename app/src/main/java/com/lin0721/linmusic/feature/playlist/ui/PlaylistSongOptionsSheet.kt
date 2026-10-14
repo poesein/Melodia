@@ -30,6 +30,7 @@ import com.lin0721.linmusic.core.ui.components.MelodiaDragHandle
 import com.lin0721.linmusic.core.ui.components.ToastManager
 import com.lin0721.linmusic.core.ui.theme.BottomSheetShape
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
+import com.lin0721.linmusic.feature.localmusic.ui.LocalAudioLinkOptions
 
 // ────────────────────────────────────────────────────────────────────────────
 // 歌曲"更多操作"弹层（下一首播放/喜欢/收藏到歌单/歌手/专辑）
@@ -176,6 +177,8 @@ fun PlaylistSongOptionsSheet(
                         }
                     )
                 }
+
+                LocalAudioLinkOptions(track.id)
 
                 if (showArtistOption) {
                     val linkedArtists = track.ar.filter { it.id > 0 }.distinctBy { it.id }

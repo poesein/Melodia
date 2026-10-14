@@ -55,13 +55,11 @@ fun SearchScreen(
     onOpenRecognition: () -> Unit = {}
 ) {
     val discoveryState by viewModel.discoveryState.collectAsStateWithLifecycle()
-    val featuredTrack by viewModel.featuredTrack.collectAsStateWithLifecycle()
     val inputState by viewModel.inputState.collectAsStateWithLifecycle()
     val mode by viewModel.mode.collectAsStateWithLifecycle()
     val searchPlatforms by viewModel.searchPlatforms.collectAsStateWithLifecycle()
     val selectedPlatform by viewModel.selectedPlatform.collectAsStateWithLifecycle()
     val selectedType by viewModel.selectedType.collectAsStateWithLifecycle()
-    val history by viewModel.history.collectAsStateWithLifecycle()
     val currentTrack by viewModel.playerManager.nowPlaying.collectAsStateWithLifecycle()
     val isPlaying by viewModel.playerManager.playWhenReady.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
@@ -99,10 +97,6 @@ fun SearchScreen(
         viewModel.cancelSearch()
     }
 
-    // 网易返回的真实推荐词，仅用于兜底触发搜索；未成功加载时为 null，不能拿占位文案当关键词去搜
-    val remoteDefaultKeyword = (discoveryState as? DiscoveryUiState.Success)?.defaultKeyword
-    val placeholder = remoteDefaultKeyword ?: "搜索你想听的"
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -120,21 +114,15 @@ fun SearchScreen(
         SearchTopBar(
             mode = mode,
             query = inputState.query,
-            placeholder = placeholder,
-            avatarUrl = userProfile?.avatarUrl,
+            placeholder = "搜索你想听的",
             focusRequester = focusRequester,
             onQueryChange = viewModel::updateQuery,
             onSubmit = {
-                // 回车/键盘搜索键只提交输入框里的原文，不能替用户挑联想词；输入框为空时退到占位显示的推荐词
-                val keyword = inputState.query.takeIf { it.isNotBlank() } ?: remoteDefaultKeyword
-                if (!keyword.isNullOrBlank()) viewModel.searchWithKeyword(keyword)
+                if (inputState.query.isNotBlank()) viewModel.searchWithKeyword(inputState.query)
             },
             onActivate = viewModel::activateSearch,
             onFieldFocused = viewModel::editQuery,
-            onCancel = viewModel::cancelSearch,
-            onOpenSidebar = onOpenSidebar,
-            onAvatarClickLoggedOut = { ToastManager.showToast("请先在主页登录以显示侧边栏哦！") },
-            onOpenRecognition = onOpenRecognition
+            onCancel = viewModel::cancelSearch
         )
 
         Box(modifier = Modifier.fillMaxSize()) {
@@ -149,23 +137,28 @@ fun SearchScreen(
                 when (targetMode) {
                     SearchMode.Discovery -> SearchDiscoveryContent(
                         state = discoveryState,
-                        featuredTrack = featuredTrack,
-                        onHotSearchClick = viewModel::searchWithKeyword,
-                        onPlayFeatured = viewModel::playFeaturedTrack,
                         onPlaylistTagClick = onPlaylistCategoryClick,
                         onRetry = viewModel::retryDiscovery
                     )
-                    SearchMode.Typing -> SearchTypingPanel(
-                        query = inputState.query,
-                        suggestions = inputState.currentSuggestions,
-                        history = history,
-                        onSubmitKeyword = viewModel::searchWithKeyword,
-                        onFillQuery = viewModel::updateQuery,
-                        onArtistClick = onArtistClick,
-                        onAlbumClick = { id -> onPlaylistClick(id, true) },
-                        onRemoveHistory = viewModel::removeHistory,
-                        onClearHistory = viewModel::clearHistory
-                    )
+                    SearchMode.Typing -> if (inputState.query.isBlank()) {
+                        SearchDiscoveryContent(
+                            state = discoveryState,
+                            onPlaylistTagClick = onPlaylistCategoryClick,
+                            onRetry = viewModel::retryDiscovery
+                        )
+                    } else {
+                        SearchTypingPanel(
+                            query = inputState.query,
+                            suggestions = inputState.currentSuggestions,
+                            history = emptyList(),
+                            onSubmitKeyword = viewModel::searchWithKeyword,
+                            onFillQuery = viewModel::updateQuery,
+                            onArtistClick = onArtistClick,
+                            onAlbumClick = { id -> onPlaylistClick(id, true) },
+                            onRemoveHistory = viewModel::removeHistory,
+                            onClearHistory = viewModel::clearHistory
+                        )
+                    }
                     SearchMode.Results -> SearchResultsContent(
                         searchPlatforms = searchPlatforms,
                         selectedPlatform = selectedPlatform,
@@ -195,7 +188,7 @@ fun SearchScreen(
                             viewModel.prepareCollectDialog(songId)
                         },
                         onOpenMoreOptions = { track ->
-                            if (userProfile == null) showLoginSheet = true else optionsTrack = track
+                            optionsTrack = track
                         }
                     )
                 }

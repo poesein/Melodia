@@ -78,6 +78,8 @@ fun PlaybackDownloadSettingsView(viewModel: SettingsViewModel) {
     val crossfadeEnabled by viewModel.crossfadeEnabled.collectAsStateWithLifecycle()
     val crossfadeDurationMs by viewModel.crossfadeDurationMs.collectAsStateWithLifecycle()
     val streamCacheEnabled by viewModel.streamCacheEnabled.collectAsStateWithLifecycle()
+    val preferLocalAudio by viewModel.preferLocalAudio.collectAsStateWithLifecycle()
+    val automaticallyMatchLocalAudio by viewModel.automaticallyMatchLocalAudio.collectAsStateWithLifecycle()
     val downloadFolderUri by viewModel.downloadFolderUri.collectAsStateWithLifecycle()
     val downloadLyricsEnabled by viewModel.downloadLyricsEnabled.collectAsStateWithLifecycle()
 
@@ -105,6 +107,20 @@ fun PlaybackDownloadSettingsView(viewModel: SettingsViewModel) {
     ) {
         item {
             SettingsGroupCard(SettingsSubMenu.PLAYBACK_DOWNLOAD.sectionTitles[0]) {
+                SettingsSwitchRow(
+                    title = "优先使用本地音频",
+                    subtitle = "优先读取手动关联或唯一匹配的外部文件，失效时回退已下载与在线音源",
+                    checked = preferLocalAudio,
+                    onCheckedChange = { viewModel.updatePreferLocalAudio(it) }
+                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                SettingsSwitchRow(
+                    title = "自动匹配本地曲库",
+                    subtitle = "请先扫描或导入本地音乐。歌名、歌手和时长一致且唯一时使用；可在歌曲菜单手动关联",
+                    checked = automaticallyMatchLocalAudio,
+                    onCheckedChange = { viewModel.updateAutomaticallyMatchLocalAudio(it) }
+                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
                 SettingsSwitchRow(
                     title = "自动播放推荐新歌",
                     subtitle = "当前曲目播放完毕后自动接入相似推荐",

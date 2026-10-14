@@ -47,6 +47,7 @@ import com.lin0721.linmusic.core.model.getQualityDisplayName
 import com.lin0721.linmusic.core.player.formatSleepTimerRemaining
 import kotlinx.coroutines.launch
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
+import com.lin0721.linmusic.feature.localmusic.ui.LocalAudioLinkOptions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,7 +77,8 @@ fun SongMoreOptionsSheet(
     onCollectClick: () -> Unit,
     onShareClick: () -> Unit,
     onDownloadClick: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    songId: Long = 0L
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
@@ -225,6 +227,7 @@ fun SongMoreOptionsSheet(
 
             if (!isLocalOnly) {
                 if (!isPodcast) {
+                    LocalAudioLinkOptions(songId)
                     // 5. 开始相似歌曲漫游
                     OptionRow(
                         icon = Icons.Rounded.Explore,

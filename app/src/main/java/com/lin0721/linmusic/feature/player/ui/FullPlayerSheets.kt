@@ -105,7 +105,8 @@ fun FullPlayerSheets(
             onCollectClick = onCollectClick,
             onShareClick = onShareClick,
             onDownloadClick = onDownloadClick,
-            onDismiss = onMoreOptionsDismiss
+            onDismiss = onMoreOptionsDismiss,
+            songId = queue.getOrNull(currentQueueIndex)?.songId ?: songState.songDetail?.id ?: 0L
         )
     }
 

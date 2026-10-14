@@ -1,0 +1,12 @@
+{
+  "upstream": "https://github.com/rinchao0721/Melodia",
+  "fork": "https://github.com/poesein/Melodia",
+  "upstream_commit": "c79ff932b616465ff42296781fe07002fdbfddb5",
+  "feature_branch": "personal/local-first-search",
+  "application_id": "com.lin0721.linmusic.personal",
+  "initial_version_name": "2.0.0-beta.2-personal.1",
+  "initial_version_code": 2000002,
+  "signing_certificate_sha256": "068c0ad458b50c506a4cc38c4799c3fd3a8fb18a16e713eecc7490493ba3de5a",
+  "automatic_upstream_sync": false,
+  "automatic_release_publication": false
+}

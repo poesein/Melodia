@@ -5,11 +5,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -22,15 +20,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -46,93 +41,35 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import com.lin0721.linmusic.core.ui.components.MelodiaIconButton
 import com.lin0721.linmusic.core.ui.components.MelodiaTextButton
-import com.lin0721.linmusic.core.ui.interaction.pressable
-import com.lin0721.linmusic.core.ui.theme.MelodiaPress
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.core.ui.theme.PillRadius
 
 private const val BAR_ANIM_DURATION = 250
 
-// 进入搜索后标题行收起，搜索框亮底转暗底并出现取消
+// 进入搜索后搜索框亮底转暗底并出现取消
 @Composable
 internal fun SearchTopBar(
     mode: SearchMode,
     query: String,
     placeholder: String,
-    avatarUrl: String?,
     focusRequester: FocusRequester,
     onQueryChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onActivate: () -> Unit,
     onFieldFocused: () -> Unit,
-    onCancel: () -> Unit,
-    onOpenSidebar: () -> Unit,
-    onAvatarClickLoggedOut: () -> Unit,
-    onOpenRecognition: () -> Unit
+    onCancel: () -> Unit
 ) {
     val isDiscovery = mode == SearchMode.Discovery
     val barTween = tween<Float>(BAR_ANIM_DURATION, easing = FastOutSlowInEasing)
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        AnimatedVisibility(
-            visible = isDiscovery,
-            enter = expandVertically(tween(BAR_ANIM_DURATION, easing = FastOutSlowInEasing)) + fadeIn(barTween),
-            exit = shrinkVertically(tween(BAR_ANIM_DURATION, easing = FastOutSlowInEasing)) + fadeOut(barTween)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (avatarUrl != null) {
-                    AsyncImage(
-                        model = "$avatarUrl?param=200y200",
-                        contentDescription = "打开侧边栏",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .pressable(MelodiaPress.Icon) { onOpenSidebar() }
-                            .clip(CircleShape)
-                    )
-                } else {
-                    Icon(
-                        Icons.Rounded.AccountCircle,
-                        contentDescription = "打开侧边栏",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .pressable(MelodiaPress.Icon) { onAvatarClickLoggedOut() }
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "搜索",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                MelodiaIconButton(onClick = onOpenRecognition) {
-                    Icon(
-                        Icons.Rounded.MusicNote,
-                        contentDescription = "听歌识曲",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
-        }
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()

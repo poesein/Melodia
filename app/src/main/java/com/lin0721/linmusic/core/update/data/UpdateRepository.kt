@@ -9,7 +9,7 @@ class UpdateRepository(private val api: GithubReleaseApi) {
     // 按渠道过滤后取 versionCode 最大的一条，仅当高于当前安装版本才视为"有更新"
     suspend fun fetchLatestUpdate(allowPrerelease: Boolean): Result<UpdateInfo?> {
         return try {
-            val releases = api.listReleases(GITHUB_OWNER, GITHUB_REPO)
+            val releases = api.listReleases(BuildConfig.UPDATE_OWNER, GITHUB_REPO)
             val candidate = releases
                 .asSequence()
                 .filterNot { it.draft }
@@ -37,7 +37,6 @@ class UpdateRepository(private val api: GithubReleaseApi) {
     }
 
     companion object {
-        private const val GITHUB_OWNER = "rinchao0721"
         private const val GITHUB_REPO = "Melodia"
     }
 }
