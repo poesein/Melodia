@@ -13,13 +13,14 @@ import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lin0721.linmusic.core.ui.components.ToastManager
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
+import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.feature.playlist.ui.OptionRow
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 /** Reused by every online-song menu; selecting a document keeps the original file in place. */
 @Composable
-fun LocalAudioLinkOptions(songId: Long) {
+fun LocalAudioLinkOptions(songId: Long, onlineTrack: Track? = null) {
     if (songId <= 0L) return
     val repository: PreferredLocalAudioRepository = koinInject()
     val scope = rememberCoroutineScope()
@@ -28,7 +29,7 @@ fun LocalAudioLinkOptions(songId: Long) {
     val preferLocal by repository.enabled.collectAsStateWithLifecycle(initialValue = true)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
-            val linked = repository.link(songId, uri)
+            val linked = repository.link(songId, uri, onlineTrack)
             ToastManager.showToast(when {
                 !linked -> "无法关联：请选择可读取的音频文件"
                 preferLocal -> "已关联本地音频，下次播放时优先读取"

@@ -7,21 +7,32 @@ import android.media.MediaMetadataRetriever
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lin0721.linmusic.core.localmusic.LocalSongMetadata
-import com.lin0721.linmusic.feature.localmusic.domain.LocalAudioCandidate
+import com.lin0721.linmusic.core.model.Track
+import com.lin0721.linmusic.feature.localmusic.domain.LocalTrack
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
+import com.lin0721.linmusic.feature.localmusic.domain.ManualLocalAudioAssociations
 import com.lin0721.linmusic.feature.localmusic.domain.PreferredLocalAudioMatcher
 import com.lin0721.linmusic.feature.localmusic.domain.resolvePreferredLocalAudio
+import com.lin0721.linmusic.feature.localmusic.data.transfer.*
+import java.io.ByteArrayOutputStream
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 private val Context.preferredLocalAudioDataStore by preferencesDataStore(name = "preferred_local_audio")
 
@@ -37,30 +48,65 @@ class PreferredLocalAudioRepository(
     private fun durationKey(songId: Long) = longPreferencesKey("song_duration_$songId")
     private fun titleKey(songId: Long) = stringPreferencesKey("song_title_$songId")
     private fun artistKey(songId: Long) = stringPreferencesKey("song_artist_$songId")
+    private fun albumKey(songId: Long) = stringPreferencesKey("song_album_$songId")
+    private fun localTitleKey(songId: Long) = stringPreferencesKey("linked_file_title_$songId")
+    private fun localSnapshotKey(songId: Long) = stringPreferencesKey("linked_file_metadata_$songId")
+    private val snapshotJson = Json { ignoreUnknownKeys = true }
 
     val enabled: Flow<Boolean> = context.preferredLocalAudioDataStore.data.map { it[enabledKey] ?: true }
     val automaticEnabled: Flow<Boolean> = context.preferredLocalAudioDataStore.data.map { it[automaticKey] ?: true }
     val changes: Flow<Unit> = combine(context.preferredLocalAudioDataStore.data, library.tracks) { _, _ -> Unit }
+    // A read projection only: Room's source/songId and the app's download records stay untouched.
+    val associatedTracks: Flow<List<LocalTrack>> = combine(context.preferredLocalAudioDataStore.data, library.tracks) { prefs, tracks ->
+        val links = storedLinks(prefs)
+        if (links.isEmpty()) tracks else {
+            val identities = HashMap<String, String?>()
+            fun identity(uri: String): String? = identities.getOrPut(uri) { localAudioIdentity(context, uri) }
+            val byIdentity = ManualLocalAudioAssociations.uniqueByIdentity(links, ::identity)
+            val localTitles = links.mapNotNull { (songId, uri) ->
+                prefs[localTitleKey(songId)] ?: tracks.firstOrNull { it.uri.toString() == uri }?.title
+            }
+            tracks.map { track ->
+                if (track.source == LocalTrackSource.MELODIA_DOWNLOAD ||
+                    (track.uri.toString() !in links.values && localTitles.isNotEmpty() &&
+                        localTitles.none { PreferredLocalAudioMatcher.sameTitle(it, track.title) })) track
+                else track.copy(songId = identity(track.uri.toString())?.let { byIdentity[it] } ?: track.songId)
+            }
+        }
+    }.flowOn(Dispatchers.IO)
     fun manualUri(songId: Long): Flow<String?> = context.preferredLocalAudioDataStore.data.map { it[linkKey(songId)] }
 
     suspend fun setEnabled(value: Boolean) { context.preferredLocalAudioDataStore.edit { it[enabledKey] = value } }
     suspend fun setAutomaticEnabled(value: Boolean) { context.preferredLocalAudioDataStore.edit { it[automaticKey] = value } }
 
-    suspend fun link(songId: Long, uri: Uri): Boolean = withContext(Dispatchers.IO) {
+    suspend fun link(songId: Long, uri: Uri, onlineTrack: Track? = null): Boolean = withContext(Dispatchers.IO) {
         if (songId <= 0L || uri.scheme != "content") return@withContext false
         try {
             // OpenDocument grants read access; retain it across restarts, without requesting write access.
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             if (!isReadable(uri.toString())) return@withContext false
             val metadata = MediaMetadataRetriever()
+            var localTitle: String? = null
             try {
                 metadata.setDataSource(context, uri)
                 if ((metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) <= 0L) {
                     return@withContext false
                 }
+                localTitle = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
             } finally { metadata.release() }
+            val snapshot = inspectAssociationFile(context, uri.toString())?.toBackupFile()
             context.preferredLocalAudioDataStore.edit {
                 it[linkKey(songId)] = uri.toString()
+                it.remove(localTitleKey(songId))
+                it.remove(localSnapshotKey(songId))
+                snapshot?.let { value -> it[localSnapshotKey(songId)] = snapshotJson.encodeToString(value) }
+                (snapshot?.title ?: localTitle)?.takeIf(String::isNotBlank)?.let { title -> it[localTitleKey(songId)] = title }
+                onlineTrack?.takeIf { value -> value.id == songId && (value.ar.any { artist -> artist.id > 0L } || value.al.id > 0L) }?.let { value ->
+                    it[titleKey(songId)] = value.name
+                    it[artistKey(songId)] = value.ar.joinToString(" • ") { artist -> artist.name }
+                    it[albumKey(songId)] = value.al.name
+                    if (value.dt > 0L) it[durationKey(songId)] = value.dt
+                }
                 it[excludedKey] = it[excludedKey].orEmpty() - songId.toString()
             }
             true
@@ -68,9 +114,58 @@ class PreferredLocalAudioRepository(
         catch (_: Exception) { false }
     }
 
+    /** Reuse MediaStore read permission or an already persisted file/folder import grant. */
+    suspend fun linkLocalTrack(track: LocalTrack, onlineTrack: Track): Boolean = withContext(Dispatchers.IO) {
+        if (onlineTrack.id <= 0L || track.source == LocalTrackSource.MELODIA_DOWNLOAD || track.uri.scheme != "content") {
+            return@withContext false
+        }
+        try {
+            val identity = localAudioIdentity(context, track.uri.toString()) ?: return@withContext false
+            val metadata = MediaMetadataRetriever()
+            try {
+                metadata.setDataSource(context, track.uri)
+                if ((metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) <= 0L) {
+                    return@withContext false
+                }
+            } finally { metadata.release() }
+            val snapshot = inspectAssociationFile(context, track.uri.toString(), track)?.toBackupFile()
+            context.preferredLocalAudioDataStore.edit { prefs ->
+                // This explicit local-file choice replaces only links to the same readable file.
+                val oldIds = ManualLocalAudioAssociations.idsForIdentity(storedLinks(prefs), identity) {
+                    localAudioIdentity(context, it)
+                }
+                oldIds.forEach { prefs.remove(linkKey(it)); prefs.remove(localTitleKey(it)); prefs.remove(localSnapshotKey(it)) }
+                prefs[excludedKey] = (prefs[excludedKey].orEmpty() + oldIds.map(Long::toString)) - onlineTrack.id.toString()
+                prefs[linkKey(onlineTrack.id)] = track.uri.toString()
+                prefs[localTitleKey(onlineTrack.id)] = track.title
+                prefs[titleKey(onlineTrack.id)] = onlineTrack.name
+                prefs[artistKey(onlineTrack.id)] = onlineTrack.ar.joinToString(" • ") { it.name }
+                prefs[albumKey(onlineTrack.id)] = onlineTrack.al.name
+                prefs.remove(localSnapshotKey(onlineTrack.id))
+                snapshot?.let { prefs[localSnapshotKey(onlineTrack.id)] = snapshotJson.encodeToString(it) }
+                if (onlineTrack.dt > 0L) prefs[durationKey(onlineTrack.id)] = onlineTrack.dt
+            }
+            true
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
+    }
+
+    suspend fun unlinkLocalTrack(track: LocalTrack) = withContext(Dispatchers.IO) {
+        context.preferredLocalAudioDataStore.edit { prefs ->
+            val identity = localAudioIdentity(context, track.uri.toString())
+            val ids = storedLinks(prefs).filter { (_, uri) ->
+                uri == track.uri.toString() || (identity != null && localAudioIdentity(context, uri) == identity)
+            }.keys
+            ids.forEach { prefs.remove(linkKey(it)); prefs.remove(localTitleKey(it)); prefs.remove(localSnapshotKey(it)) }
+            prefs[excludedKey] = prefs[excludedKey].orEmpty() + ids.map(Long::toString)
+        }
+    }
+
     suspend fun unlink(songId: Long) {
         context.preferredLocalAudioDataStore.edit {
             it.remove(linkKey(songId))
+            it.remove(localTitleKey(songId))
+            it.remove(localSnapshotKey(songId))
             // Explicitly unlinking must not immediately reselect the same file by metadata.
             it[excludedKey] = it[excludedKey].orEmpty() + songId.toString()
         }
@@ -96,21 +191,28 @@ class PreferredLocalAudioRepository(
             manualUri = prefs[linkKey(songId)],
             automaticEnabled = (prefs[automaticKey] ?: true) && songId.toString() !in prefs[excludedKey].orEmpty(),
             automaticUri = {
-                val candidates = library.tracks.first().filter { it.source != LocalTrackSource.MELODIA_DOWNLOAD }
-                    .map { LocalAudioCandidate(it.uri.toString(), it.title, it.artist, it.durationMs) }
-                    .filter { PreferredLocalAudioMatcher.sameTitle(title, it.title) }
+                val candidates = readableLocalAudioCandidates(context, library.tracks.first().filter {
+                    it.source != LocalTrackSource.MELODIA_DOWNLOAD && PreferredLocalAudioMatcher.sameTitle(title, it.title)
+                })
                 if (candidates.isEmpty()) null else {
                     val cachedDuration = prefs[durationKey(songId)]
-                    val metadata = if (cachedDuration != null) LocalSongMetadata(
-                        prefs[titleKey(songId)] ?: title, prefs[artistKey(songId)] ?: artist, cachedDuration
-                    ) else loadMetadata()?.takeIf { it.durationMs > 0L }?.also { value ->
+                    val cached = if (cachedDuration != null) LocalSongMetadata(
+                        prefs[titleKey(songId)] ?: title, prefs[artistKey(songId)] ?: artist, cachedDuration, prefs[albumKey(songId)]
+                    ) else null
+                    // Earlier personal builds cached duration without album. Refresh only when the
+                    // old cache cannot already match, and keep that cache usable if the request fails.
+                    val needsAlbum = cached != null && cached.album.isNullOrBlank() &&
+                        PreferredLocalAudioMatcher.uniqueMatch(cached.title, cached.artist, cached.durationMs, candidates, cached.album) == null
+                    val metadata = if (cached == null || needsAlbum) loadMetadata()?.takeIf { it.durationMs > 0L }?.also { value ->
                         context.preferredLocalAudioDataStore.edit {
                             it[durationKey(songId)] = value.durationMs
                             it[titleKey(songId)] = value.title
                             it[artistKey(songId)] = value.artist
+                            it.remove(albumKey(songId))
+                            value.album?.let { album -> it[albumKey(songId)] = album }
                         }
-                    }
-                    metadata?.let { PreferredLocalAudioMatcher.uniqueMatch(it.title, it.artist, it.durationMs, candidates) }
+                    } ?: cached else cached
+                    metadata?.let { PreferredLocalAudioMatcher.uniqueMatch(it.title, it.artist, it.durationMs, candidates, it.album) }
                 }
             },
             isReadable = ::isReadable
@@ -121,10 +223,14 @@ class PreferredLocalAudioRepository(
     suspend fun knownPlayableIds(ids: Collection<Long>): Set<Long> = withContext(Dispatchers.IO) {
         val prefs = context.preferredLocalAudioDataStore.data.first()
         if (prefs[enabledKey] == false) return@withContext emptySet()
-        val candidates = if (prefs[automaticKey] != false) library.tracks.first()
-            .filter { it.source != LocalTrackSource.MELODIA_DOWNLOAD }
-            .map { LocalAudioCandidate(it.uri.toString(), it.title, it.artist, it.durationMs) }
-            else emptyList()
+        val cachedTitles = ids.mapNotNull { songId -> prefs[titleKey(songId)]?.takeIf { prefs[durationKey(songId)] != null } }
+        val candidates = if (prefs[automaticKey] != false && cachedTitles.isNotEmpty()) {
+            readableLocalAudioCandidates(context, library.tracks.first().filter { track ->
+                track.source != LocalTrackSource.MELODIA_DOWNLOAD && cachedTitles.any {
+                    PreferredLocalAudioMatcher.sameTitle(it, track.title)
+                }
+            })
+        } else emptyList()
         ids.filterTo(HashSet()) { songId ->
             resolvePreferredLocalAudio(
                 enabled = songId > 0L,
@@ -133,13 +239,155 @@ class PreferredLocalAudioRepository(
                 automaticUri = {
                     PreferredLocalAudioMatcher.uniqueMatch(
                         prefs[titleKey(songId)].orEmpty(), prefs[artistKey(songId)].orEmpty(),
-                        prefs[durationKey(songId)] ?: 0L, candidates
+                        prefs[durationKey(songId)] ?: 0L, candidates, prefs[albumKey(songId)]
                     )
                 },
                 isReadable = ::isReadable
             ) != null
         }
     }
+
+    /** Only confirmed references are exported; automatic playback matches are not saved associations. */
+    suspend fun exportAssociations(destination: Uri): AssociationExportResult = withContext(Dispatchers.IO) {
+        require(destination.scheme == "content") { "请选择文档保存位置" }
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        val links = storedLinks(prefs)
+        require(links.size <= AssociationBackupCodec.MAX_RECORDS) { "关联记录超过 10000 条" }
+        val tracks = library.tracks.first().associateBy { it.uri.toString() }
+        val issues = ArrayList<AssociationTransferIssue>()
+        val records = links.toSortedMap().map { (songId, uri) ->
+            currentCoroutineContext().ensureActive()
+            val liveCandidate = inspectAssociationFile(context, uri, tracks[uri])
+            val live = liveCandidate?.toBackupFile()
+            val saved = prefs[localSnapshotKey(songId)]?.let { value ->
+                runCatching { snapshotJson.decodeFromString<AssociationLocalFile>(value) }.getOrNull()
+            }?.takeIf { it.uri == uri }
+            val tracked = tracks[uri]
+            val unavailableReason = "当前文件不可读取或无法取得完整音频信息，保留原引用供重新选择"
+            val changedFile = saved != null && liveCandidate != null && AssociationImportPlanner.hasPortableEvidence(saved) &&
+                !AssociationImportPlanner.sameFileEvidence(saved, liveCandidate)
+            val local = if (changedFile) saved!!.copy(readableAtExport = false,
+                exportIssue = "文件信息在建立关联后已变化，保留确认时记录供重新选择") else live ?: (saved ?: AssociationLocalFile(
+                uri = uri,
+                fileName = tracked?.path?.substringAfterLast('/'),
+                title = tracked?.title ?: prefs[localTitleKey(songId)],
+                artist = tracked?.artist,
+                album = tracked?.album,
+                durationMs = tracked?.durationMs,
+                sizeBytes = tracked?.sizeBytes
+            )).copy(readableAtExport = false, exportIssue = unavailableReason)
+            val issue = local.exportIssue ?: if (!AssociationImportPlanner.hasPortableEvidence(local)) {
+                "缺少完整文件名、标签、大小或时长，恢复时需重新选择音频"
+            } else null
+            issue?.let { issues += AssociationTransferIssue(songId, prefs[titleKey(songId)], it) }
+            AssociationBackupRecord(AssociationOnlineSong(songId, prefs[titleKey(songId)], prefs[artistKey(songId)],
+                prefs[albumKey(songId)], prefs[durationKey(songId)]), local)
+        }
+        val bytes = AssociationBackupCodec.encode(AssociationBackup(exportedAtMs = System.currentTimeMillis(), records = records))
+            .toByteArray(Charsets.UTF_8)
+        val output = context.contentResolver.openOutputStream(destination, "wt") ?: error("无法打开保存文档")
+        output.use { it.write(bytes) }
+        AssociationExportResult(records.size, issues)
+    }
+
+    suspend fun previewAssociationImport(source: Uri): AssociationImportPreview = withContext(Dispatchers.IO) {
+        require(source.scheme == "content") { "请选择关联备份文档" }
+        val input = context.contentResolver.openInputStream(source) ?: error("无法打开关联备份")
+        val bytes = input.use { stream ->
+            val buffer = ByteArray(8_192)
+            val result = ByteArrayOutputStream()
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val count = stream.read(buffer)
+                if (count < 0) break
+                require(result.size() + count <= AssociationBackupCodec.MAX_BYTES) { "关联备份超过 20 MB" }
+                result.write(buffer, 0, count)
+            }
+            result.toByteArray()
+        }
+        val backup = AssociationBackupCodec.decode(bytes.toString(Charsets.UTF_8))
+        val candidates = importCandidates(backup.records)
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        val identityCache = candidates.associate { it.uri to it.identity }.toMutableMap<String, String?>()
+        AssociationImportPlanner.preview(backup.records, candidates, storedLinks(prefs)) { uri ->
+            identityCache.getOrPut(uri) { localAudioIdentity(context, uri) }
+        }
+    }
+
+    /** Rechecks the approved files and saves additions in one transaction, preserving conflicts and settings. */
+    suspend fun applyAssociationImport(preview: AssociationImportPreview): AssociationImportResult = withContext(Dispatchers.IO) {
+        val records = preview.rows.map { it.record }
+        AssociationBackupCodec.validate(AssociationBackup(records = records))
+        val candidates = importCandidates(records)
+        val byUri = candidates.associateBy { it.uri }
+        val identityCache = candidates.associate { it.uri to it.identity }.toMutableMap<String, String?>()
+        val prefs = context.preferredLocalAudioDataStore.data.first()
+        val currentLinks = storedLinks(prefs)
+        val checked = AssociationImportPlanner.preview(records, candidates, currentLinks) { uri ->
+            identityCache.getOrPut(uri) { localAudioIdentity(context, uri) }
+        }.rows.associateBy { it.record.online.songId }
+        val additions = ArrayList<Pair<AssociationBackupRecord, AssociationLocalCandidate>>()
+        val issues = ArrayList<AssociationTransferIssue>()
+        var sameCount = 0
+        preview.rows.forEach { row ->
+            val now = checked[row.record.online.songId]!!
+            when {
+                row.status == AssociationImportStatus.SAME && now.status == AssociationImportStatus.SAME -> sameCount++
+                row.status == AssociationImportStatus.NEW && now.status == AssociationImportStatus.NEW &&
+                    now.resolvedIdentity == row.resolvedIdentity -> {
+                    val file = now.resolvedUri?.let(byUri::get)
+                    if (file != null) additions += row.record to file
+                    else issues += AssociationTransferIssue(row.record.online.songId, row.record.online.title, "预览后的文件状态已变化，请重新导入预览")
+                }
+                else -> issues += AssociationTransferIssue(row.record.online.songId, row.record.online.title,
+                    if (row.status == AssociationImportStatus.NEW) now.reason.ifBlank { "文件状态已变化，请重新导入预览" } else row.reason)
+            }
+        }
+        var changedSincePreview = currentLinks != preview.existingLinks
+        if (!changedSincePreview && additions.isNotEmpty()) {
+            currentCoroutineContext().ensureActive()
+            context.preferredLocalAudioDataStore.edit { current ->
+                if (storedLinks(current) != preview.existingLinks) {
+                    changedSincePreview = true
+                } else additions.forEach { (record, file) ->
+                    val id = record.online.songId
+                    current[linkKey(id)] = file.uri
+                    current[localTitleKey(id)] = file.title
+                    current[localSnapshotKey(id)] = snapshotJson.encodeToString(file.toBackupFile())
+                    record.online.title?.let { current[titleKey(id)] = it }
+                    record.online.artist?.let { current[artistKey(id)] = it }
+                    record.online.album?.let { current[albumKey(id)] = it }
+                    record.online.durationMs?.takeIf { it > 0L }?.let { current[durationKey(id)] = it }
+                    // Exclusion flags and global playback switches are intentionally preserved.
+                }
+            }
+        }
+        if (changedSincePreview) {
+            AssociationImportResult(0, 0, records.size, records.map { record ->
+                AssociationTransferIssue(record.online.songId, record.online.title, "当前关联在预览后发生变化，未写入；请重新导入预览")
+            })
+        } else {
+            AssociationImportResult(additions.size, sameCount, records.size - additions.size - sameCount, issues)
+        }
+    }
+
+    private suspend fun importCandidates(records: List<AssociationBackupRecord>): List<AssociationLocalCandidate> {
+        val accepts = AssociationImportPlanner.candidateFilter(records)
+        return library.tracks.first().filter { track ->
+            accepts(track.uri.toString(), track.title, track.path?.substringAfterLast('/'))
+        }.distinctBy { it.uri.toString() }.mapNotNull { track ->
+            currentCoroutineContext().ensureActive()
+            inspectAssociationFile(context, track.uri.toString(), track)
+        }
+    }
+
+    private fun storedLinks(prefs: Preferences): Map<Long, String> = prefs.asMap().mapNotNull { (key, value) ->
+        if (!key.name.startsWith("song_uri_")) null else {
+            val songId = key.name.removePrefix("song_uri_").toLongOrNull()
+            val uri = value as? String
+            if (songId != null && songId > 0L && uri != null) songId to uri else null
+        }
+    }.toMap()
 
     private suspend fun isReadable(uri: String): Boolean = withContext(Dispatchers.IO) {
         try {

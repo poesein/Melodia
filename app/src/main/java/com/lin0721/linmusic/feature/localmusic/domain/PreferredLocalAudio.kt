@@ -8,7 +8,11 @@ data class LocalAudioCandidate(
     val uri: String,
     val title: String,
     val artist: String,
-    val durationMs: Long
+    val durationMs: Long,
+    // MediaStore and SAF can refer to the same physical audio file.
+    val identity: String? = null,
+    val album: String? = null,
+    val fileName: String? = null
 )
 
 /** Matching deliberately keeps version suffixes, punctuation and every artist. */
@@ -25,17 +29,46 @@ object PreferredLocalAudioMatcher {
 
     fun sameTitle(title: String, other: String): Boolean = normalize(title).isNotEmpty() && normalize(title) == normalize(other)
 
-    fun sameMetadata(title: String, artist: String, candidate: LocalAudioCandidate): Boolean {
+    private fun sameAlbum(album: String?, other: String?): Boolean =
+        !album.isNullOrBlank() && !other.isNullOrBlank() && normalize(album) == normalize(other)
+
+    fun sameMetadata(title: String, artist: String, candidate: LocalAudioCandidate, onlineAlbum: String? = null): Boolean {
         val names = artists(artist)
-        return sameTitle(title, candidate.title) &&
-            names.isNotEmpty() && names == artists(candidate.artist)
+        if (!sameTitle(title, candidate.title) || names.isEmpty() || hiddenVersion(candidate)) return false
+        val localNames = artists(candidate.artist)
+        if (names == localNames) return true
+        // Some real tags serialize a verified multi-artist credit as A/B. A single
+        // online artist such as AC/DC remains a whole name; require matching album.
+        return names.size > 1 && names.none { '/' in it } && sameAlbum(onlineAlbum, candidate.album) &&
+            localNames.flatMap { it.split('/') }.map(::normalize).filter { it !in unknownArtists }.toSet() == names
     }
 
-    fun uniqueMatch(title: String, artist: String, durationMs: Long, candidates: List<LocalAudioCandidate>): String? {
+    private fun hiddenVersion(candidate: LocalAudioCandidate): Boolean {
+        val fileName = candidate.fileName?.substringBeforeLast('.') ?: return false
+        val nameWithoutArtist = fileName.replace(Regex("^${Regex.escape(candidate.artist)}\\s*[-_—]\\s*", RegexOption.IGNORE_CASE), "")
+        val markers = Regex("(?i)\\b(live|remaster(?:ed)?|acoustic|instrumental|karaoke|remix|demo)\\b|现场|重制|重录|伴奏|不插电")
+        fun hints(value: String) = markers.findAll(value).map { normalize(it.value) }.toSet()
+        return hints(nameWithoutArtist).any { it !in hints(candidate.title) }
+    }
+
+    private fun formatRank(candidate: LocalAudioCandidate): Int = when (candidate.fileName?.substringAfterLast('.')?.lowercase(Locale.ROOT)) {
+        "flac", "ape" -> 4
+        "wav", "aiff", "aif" -> 3
+        "m4a", "alac" -> 2
+        else -> 1
+    }
+
+    fun uniqueMatch(title: String, artist: String, durationMs: Long, candidates: List<LocalAudioCandidate>, onlineAlbum: String? = null): String? {
         if (durationMs <= 0L) return null
-        return candidates.filter {
-            sameMetadata(title, artist, it) && it.durationMs > 0L && abs(it.durationMs - durationMs) <= 2_000L
-        }.distinctBy { it.uri }.singleOrNull()?.uri
+        val matches = candidates.filter {
+            val tolerance = if (sameAlbum(onlineAlbum, it.album)) (durationMs / 50L).coerceIn(2_000L, 5_000L) else 2_000L
+            sameMetadata(title, artist, it, onlineAlbum) && it.durationMs > 0L && abs(it.durationMs - durationMs) <= tolerance
+        }.distinctBy { it.identity ?: it.uri }
+        if (matches.size == 1) return matches.single().uri
+        if (matches.isEmpty() || matches.any { !sameAlbum(onlineAlbum, it.album) }) return null
+        if (matches.maxOf { it.durationMs } - matches.minOf { it.durationMs } > 2_000L) return null
+        // Equivalent copies of the confirmed album/version may use different encodings.
+        return matches.sortedWith(compareByDescending<LocalAudioCandidate> { formatRank(it) }.thenBy { it.uri }).first().uri
     }
 }
 

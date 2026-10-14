@@ -708,9 +708,9 @@ class PlayerManager(
         val uri = try {
             localMusicApi.preferredUri(item.songId, item.title, item.artist) {
                 // Look up full artist names and duration only when a local title candidate exists; retain metadata for offline use.
-                if (!onlineState.isOnline()) null else withTimeoutOrNull(3_000L) {
+                if (!onlineState.isOnline()) null else withTimeoutOrNull(10_000L) {
                     repository.getSongDetail(item.songId).first().getOrNull()?.let {
-                        LocalSongMetadata(it.name, it.ar.joinToString(" • ") { ar -> ar.name }, it.dt)
+                        LocalSongMetadata(it.name, it.ar.joinToString(" • ") { ar -> ar.name }, it.dt, it.al.name)
                     }
                 }
             }

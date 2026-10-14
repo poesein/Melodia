@@ -21,6 +21,18 @@ class PreferredLocalAudioTest {
         assertEquals(studio.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(studio, studio)))
     }
 
+    @Test fun scannedAndImportedUrisForTheSamePhysicalFileAreOneCandidate() {
+        val scanned = studio.copy(identity = "file:1:2:0:500")
+        val imported = studio.copy(uri = "content://documents/same-file", identity = scanned.identity)
+        assertEquals(scanned.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(scanned, imported)))
+    }
+
+    @Test fun genuinelyDifferentFilesStayAmbiguousEvenWithEqualMetadata() {
+        val scanned = studio.copy(identity = "file:1:2:0:500")
+        val other = studio.copy(uri = "content://documents/other-file", identity = "file:1:3:0:500")
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(scanned, other)))
+    }
+
     @Test fun liveRemasterAndAcousticSuffixesArePreserved() {
         listOf("Song (Live)", "Song - Remastered", "Song (Acoustic)", "Song (伴奏)").forEach { title ->
             assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(studio.copy(title = title))))
@@ -48,6 +60,37 @@ class PreferredLocalAudioTest {
         val band = studio.copy(artist = "AC/DC")
         assertEquals(band.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "AC/DC", 180_000L, listOf(band)))
         assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "AC, DC", 180_000L, listOf(band)))
+    }
+
+    @Test fun realSameAlbumEncodingCopiesPreferFlacWithinVerifiedDurationTolerance() {
+        val mp3 = LocalAudioCandidate("content://mp3", "STAY TUNE", "Suchmos", 298_747L, album = "LOVE&VICE", fileName = "Suchmos - STAY TUNE.mp3")
+        val flac = mp3.copy(uri = "content://flac", identity = "other-file", fileName = "Suchmos - STAY TUNE.flac")
+        assertEquals(flac.uri, PreferredLocalAudioMatcher.uniqueMatch("STAY TUNE", "Suchmos", 295_858L, listOf(mp3, flac), "LOVE&VICE"))
+    }
+
+    @Test fun extendedDurationToleranceRequiresMatchingAlbumAndHasFiveSecondCap() {
+        val candidate = studio.copy(durationMs = 304_838L, album = "Confirmed Album")
+        assertEquals(candidate.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 300_000L, listOf(candidate), "Confirmed Album"))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 300_000L, listOf(candidate)))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 300_000L, listOf(candidate), "Another Album"))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 300_000L, listOf(candidate.copy(durationMs = 305_001L)), "Confirmed Album"))
+    }
+
+    @Test fun differentAlbumCopiesStillRequireManualChoice() {
+        val one = studio.copy(album = "First", fileName = "song.flac")
+        val two = studio.copy(uri = "content://second", identity = "second-file", album = "Second", fileName = "song.mp3")
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(one, two), "Third"))
+    }
+
+    @Test fun filenameLiveEvidenceRejectsMislabelledStudioTag() {
+        val live = studio.copy(album = "Album", fileName = "Artist - Song (Live at Tokyo).flac")
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "Artist", 180_000L, listOf(live), "Album"))
+    }
+
+    @Test fun verifiedMultiArtistSlashCreditMatchesOnlyWithSameAlbum() {
+        val duet = studio.copy(artist = "陈奕迅/eason and the duo band", album = "L.O.V.E.")
+        assertEquals(duet.uri, PreferredLocalAudioMatcher.uniqueMatch("Song", "陈奕迅 • eason and the duo band", 180_000L, listOf(duet), "L.O.V.E."))
+        assertNull(PreferredLocalAudioMatcher.uniqueMatch("Song", "陈奕迅 • eason and the duo band", 180_000L, listOf(duet)))
     }
 
     @Test fun manualChoiceHasPriorityAndDoesNotRunAutoMatching() = runBlocking {

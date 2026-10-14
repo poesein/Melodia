@@ -157,7 +157,7 @@ fun SongMoreOptionsSheet(
 
             if (isLocalOnly) {
                 Text(
-                    text = "本地歌曲未匹配到云端信息，仅支持部分操作",
+                    text = "此本地歌曲尚未关联网易云，可在本地歌曲菜单关联",
                     color = TextGray,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)

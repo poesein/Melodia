@@ -56,6 +56,8 @@ fun PlaylistSongOptionsSheet(
     canRemoveFromPlaylist: Boolean = false,
     onRemoveFromPlaylist: (Long) -> Unit = {},
     onDownloadClick: ((Track) -> Unit)? = null,
+    // 本地曲目菜单使用本地→网易云关联入口，其余场景保留网易云→本地文件入口。
+    showLocalAudioLinkOptions: Boolean = true,
     // 额外操作项
     extraOptions: @Composable ColumnScope.() -> Unit = {}
 ) {
@@ -178,7 +180,7 @@ fun PlaylistSongOptionsSheet(
                     )
                 }
 
-                LocalAudioLinkOptions(track.id)
+                if (showLocalAudioLinkOptions) LocalAudioLinkOptions(track.id, track)
 
                 if (showArtistOption) {
                     val linkedArtists = track.ar.filter { it.id > 0 }.distinctBy { it.id }
