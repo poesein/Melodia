@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lin0721.linmusic.LocalBottomOverlayInset
 import com.lin0721.linmusic.core.player.CrossfadePolicy
 import com.lin0721.linmusic.feature.localmusic.ui.LocalAudioAssociationTransferOptions
+import com.lin0721.linmusic.feature.localmusic.ui.LocalMatchingSettingsEntry
 import com.lin0721.linmusic.feature.player.ui.LyricCapsuleSlider
 import com.lin0721.linmusic.core.ui.components.ToastManager
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
@@ -122,6 +123,7 @@ fun PlaybackDownloadSettingsView(viewModel: SettingsViewModel) {
                     onCheckedChange = { viewModel.updateAutomaticallyMatchLocalAudio(it) }
                 )
                 LocalAudioAssociationTransferOptions()
+                LocalMatchingSettingsEntry()
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
                 SettingsSwitchRow(
                     title = "自动播放推荐新歌",

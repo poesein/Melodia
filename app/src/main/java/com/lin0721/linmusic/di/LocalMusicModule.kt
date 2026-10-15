@@ -7,6 +7,7 @@ import com.lin0721.linmusic.feature.localmusic.data.LocalLibraryRepository
 import com.lin0721.linmusic.feature.localmusic.data.LocalMusicApiImpl
 import com.lin0721.linmusic.feature.localmusic.data.LocalMusicSettings
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
+import com.lin0721.linmusic.feature.localmusic.data.LocalAlbumAssociationStore
 import com.lin0721.linmusic.feature.localmusic.data.batch.LocalMatchCoverRepository
 import com.lin0721.linmusic.feature.localmusic.data.batch.BatchLocalMatchRepository
 import com.lin0721.linmusic.feature.localmusic.data.LocalPlaylistRepository
@@ -46,6 +47,7 @@ val localMusicModule = module {
     single { LocalLyricsReader(androidContext(), dao = get()) }
     single { LocalTagEditor(androidContext()) }
     single { PreferredLocalAudioRepository(androidContext(), library = get()) }
+    single { LocalAlbumAssociationStore(androidContext()) }
     single { LocalMatchCoverRepository(playerRepository = get()) }
     single { BatchLocalMatchRepository(androidContext(), preferredAudio = get(), search = get(), covers = get()) }
     single<LocalMusicApi> { LocalMusicApiImpl(coverArtCache = get(), lyricsReader = get(), preferredAudio = get()) }

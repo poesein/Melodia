@@ -22,6 +22,8 @@ import com.lin0721.linmusic.feature.localmusic.domain.BatchAssociationSaveResult
 import com.lin0721.linmusic.feature.localmusic.domain.BatchAssociationSaveStatus
 import com.lin0721.linmusic.feature.localmusic.domain.BatchOnlineMatchPolicy
 import com.lin0721.linmusic.feature.localmusic.domain.BatchOnlineMatchStatus
+import com.lin0721.linmusic.feature.localmusic.domain.AlbumScopedMatchPolicy
+import com.lin0721.linmusic.feature.localmusic.domain.AlbumScopedMatchStatus
 import com.lin0721.linmusic.feature.localmusic.domain.resolvePreferredLocalAudio
 import com.lin0721.linmusic.feature.localmusic.data.transfer.*
 import com.lin0721.linmusic.feature.localmusic.data.batch.batchAssociationGuard
@@ -233,6 +235,56 @@ class PreferredLocalAudioRepository(
     suspend fun confirmedTrack(songId: Long): Track? = withContext(Dispatchers.IO) {
         val prefs = context.preferredLocalAudioDataStore.data.first()
         if (prefs[linkKey(songId)] == null) null else cachedTrack(prefs, songId)
+    }
+
+    /** One preference snapshot for album previews; physical aliases remain a write-time safety check. */
+    suspend fun manualLinksSnapshot(): Map<Long, String> = withContext(Dispatchers.IO) {
+        storedLinks(context.preferredLocalAudioDataStore.data.first())
+    }
+
+    /** Save a uniquely matched song inside a user-confirmed album without replacing existing links. */
+    suspend fun linkAlbumMatch(
+        track: LocalTrack,
+        onlineTracks: List<Track>,
+        selected: Track,
+    ): BatchAssociationSaveResult = withContext(Dispatchers.IO) {
+        if (track.source == LocalTrackSource.MELODIA_DOWNLOAD || selected.id <= 0L ||
+            onlineTracks.none { it.id == selected.id }) {
+            return@withContext BatchAssociationSaveResult(BatchAssociationSaveStatus.CONFLICT, "此歌曲不在已确认的专辑范围内")
+        }
+        val live = inspectAssociationFile(context, track.uri.toString(), track)
+            ?: return@withContext BatchAssociationSaveResult(BatchAssociationSaveStatus.UNREADABLE, "文件不可读取，请检查授权或重新扫描")
+        val candidate = LocalAudioCandidate(live.uri, live.title, live.artist, live.durationMs, live.identity, live.album, live.fileName)
+        val decision = AlbumScopedMatchPolicy.evaluate(candidate, onlineTracks)
+        val onlineTrack = decision.match
+        if (decision.status != AlbumScopedMatchStatus.MATCH || onlineTrack == null || onlineTrack.id != selected.id) {
+            return@withContext BatchAssociationSaveResult(BatchAssociationSaveStatus.CHANGED, "重新读取后未能在专辑内唯一匹配，请手动核对")
+        }
+        var result = BatchAssociationSaveResult(BatchAssociationSaveStatus.CONFLICT, "关联冲突，原关联已保留")
+        context.preferredLocalAudioDataStore.edit { prefs ->
+            val guard = batchAssociationGuard(onlineTrack.id, live.uri, live.identity, prefs[excludedKey].orEmpty(), storedLinks(prefs)) {
+                localAudioIdentity(context, it)
+            }
+            if (guard != null) {
+                result = guard
+                return@edit
+            }
+            if (localAudioIdentity(context, live.uri) != live.identity) {
+                result = BatchAssociationSaveResult(BatchAssociationSaveStatus.CHANGED, "写入前文件状态变化，未建立关联")
+                return@edit
+            }
+            prefs[linkKey(onlineTrack.id)] = live.uri
+            prefs[localTitleKey(onlineTrack.id)] = live.title
+            prefs[localSnapshotKey(onlineTrack.id)] = snapshotJson.encodeToString(live.toBackupFile())
+            prefs[titleKey(onlineTrack.id)] = onlineTrack.name
+            prefs[artistKey(onlineTrack.id)] = onlineTrack.ar.joinToString(" • ") { it.name }
+            prefs[albumKey(onlineTrack.id)] = onlineTrack.al.name
+            onlineTrack.al.picUrl.takeIf(String::isNotBlank)?.let { prefs[albumCoverKey(onlineTrack.id)] = it }
+            if (onlineTrack.al.id > 0L) prefs[albumIdKey(onlineTrack.id)] = onlineTrack.al.id
+            prefs[durationKey(onlineTrack.id)] = onlineTrack.dt
+            result = BatchAssociationSaveResult(BatchAssociationSaveStatus.SAVED, "专辑内唯一匹配，已建立关联")
+        }
+        result
     }
 
     suspend fun confirmedPlayableTrack(songId: Long): Track? = withContext(Dispatchers.IO) {

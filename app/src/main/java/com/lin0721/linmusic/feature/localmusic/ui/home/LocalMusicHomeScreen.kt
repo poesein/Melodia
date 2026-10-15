@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,7 +33,6 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,15 +40,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,15 +73,6 @@ import com.lin0721.linmusic.core.ui.theme.PillRadius
 import com.lin0721.linmusic.feature.cloud.domain.formatFileSize
 import com.lin0721.linmusic.feature.localmusic.domain.LocalLibraryIndex
 import com.lin0721.linmusic.feature.localmusic.domain.LocalPlaylist
-import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchState
-import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchStatus
-import com.lin0721.linmusic.feature.localmusic.data.batch.BatchLocalMatchRepository
-import com.lin0721.linmusic.feature.localmusic.ui.BatchLocalMatchSheet
-import com.lin0721.linmusic.feature.localmusic.ui.BatchMatchFilter
-import com.lin0721.linmusic.feature.localmusic.ui.BatchReviewSession
-import com.lin0721.linmusic.feature.localmusic.ui.batchUnresolvedUris
-import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchRow
-import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.feature.localmusic.ui.LocalLibraryStateGate
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicNavigation
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicUiState
@@ -100,8 +85,6 @@ import com.lin0721.linmusic.feature.localmusic.ui.components.LocalTrackRow
 import com.lin0721.linmusic.feature.localmusic.ui.playlist.LocalPlaylistCover
 import com.lin0721.linmusic.feature.localmusic.ui.playlist.NewPlaylistTile
 import org.koin.androidx.compose.koinViewModel
-import org.koin.compose.koinInject
-import kotlinx.coroutines.launch
 
 private const val RECENT_TRACK_COUNT = 5
 private const val SHELF_ITEM_COUNT = 10
@@ -121,71 +104,7 @@ fun LocalMusicHomeScreen(
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showImportSheet by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
-    var showBatchMatch by remember { mutableStateOf(false) }
-    var reviewSession by remember { mutableStateOf<BatchReviewSession?>(null) }
-    var reviewBaselineSequence by remember { mutableStateOf(0L) }
-    var batchFilter by rememberSaveable { mutableStateOf(BatchMatchFilter.REVIEW) }
-    val batchListState = rememberLazyListState()
-    val uiScope = rememberCoroutineScope()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
-    val onlineAssociation by viewModel.onlineAssociation.collectAsStateWithLifecycle()
-    val associationCompletion by viewModel.associationCompletion.collectAsStateWithLifecycle()
-    val associationSavingUri by viewModel.associationSavingUri.collectAsStateWithLifecycle()
-    val batchRepository: BatchLocalMatchRepository = koinInject()
-    val batchState by batchRepository.state.collectAsStateWithLifecycle()
-
-    fun openReviewItem(session: BatchReviewSession) {
-        val row = batchRepository.state.value.rows.firstOrNull { it.local.uri.toString() == session.currentUri } ?: return
-        viewModel.openOnlineAssociation(
-            library.tracks.firstOrNull { it.uri == row.local.uri } ?: row.local,
-            initialCandidates = (row.candidates + listOfNotNull(row.matchedTrack)).distinctBy { it.id }
-        )
-    }
-
-    fun beginReview(row: BatchLocalMatchRow? = null): Boolean {
-        if (viewModel.associationSavingUri.value != null || viewModel.onlineAssociation.value != null) return false
-        val session = BatchReviewSession.start(batchRepository.state.value.rows, batchFilter, row?.local?.uri?.toString()) ?: return false
-        // Also catch an automatic pass still initializing before isRunning becomes true.
-        batchRepository.pauseForReview()
-        reviewBaselineSequence = viewModel.associationCompletion.value?.sequence ?: 0L
-        reviewSession = session
-        openReviewItem(session)
-        return true
-    }
-
-    fun advanceReview(completedUri: String? = null) {
-        if (viewModel.associationSavingUri.value != null) return
-        val current = reviewSession ?: return
-        val remaining = batchUnresolvedUris(batchRepository.state.value.rows) - setOfNotNull(completedUri)
-        val next = current.advance(remaining)
-        reviewBaselineSequence = viewModel.associationCompletion.value?.sequence ?: 0L
-        reviewSession = next
-        if (next == null) viewModel.closeOnlineAssociation() else openReviewItem(next)
-    }
-
-    fun confirmReview(online: Track, expectedUri: String?) {
-        val current = viewModel.onlineAssociation.value ?: return
-        val local = current.track
-        // A second tap from the old frame must never associate its candidate to the next file.
-        if (expectedUri == null || local.uri.toString() != expectedUri || current.results.none { it.id == online.id }) return
-        val completed = viewModel.associationCompletion.value
-        if (completed?.localUri == local.uri.toString() && completed.sequence > reviewBaselineSequence) return
-        viewModel.linkOnlineAssociation(local, online, closeOnSuccess = false) {
-            batchRepository.recordManualAssociation(local, online)
-        }
-    }
-
-    LaunchedEffect(library.tracks.size) { batchRepository.refresh() }
-    LaunchedEffect(showBatchMatch) {
-        if (showBatchMatch) batchRepository.refreshIfNeeded()
-    }
-    LaunchedEffect(associationCompletion?.sequence, associationSavingUri, showBatchMatch) {
-        val completed = associationCompletion ?: return@LaunchedEffect
-        if (showBatchMatch && associationSavingUri == null &&
-            completed.sequence > reviewBaselineSequence && reviewSession?.currentUri == completed.localUri) {
-            advanceReview(completed.localUri)
-        }
-    }
 
     val importFilesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) viewModel.importFiles(uris)
@@ -219,10 +138,6 @@ fun LocalMusicHomeScreen(
                         showOverflowMenu = false
                         viewModel.load()
                     })
-                    DropdownMenuItem(text = { Text("批量匹配网易云") }, onClick = {
-                        showOverflowMenu = false
-                        showBatchMatch = true
-                    })
                     DropdownMenuItem(text = { Text("本地音乐设置") }, onClick = {
                         showOverflowMenu = false
                         navigation.openSettings()
@@ -243,68 +158,14 @@ fun LocalMusicHomeScreen(
                         playingMediaId = playingMediaId,
                         isPlaying = isPlaying,
                         viewModel = viewModel,
-                        navigation = navigation,
-                        batchState = batchState,
-                        onOpenBatchMatch = { showBatchMatch = true },
-                        onStartBatchMatch = {
-                            showBatchMatch = true
-                            if (!batchState.isRunning) batchRepository.startOrResume()
-                        }
+                        navigation = navigation
                     )
                 }
             }
         }
     }
 
-    LocalTrackActionsHost(viewModel = viewModel, navigation = navigation, showOnlineAssociation = !showBatchMatch)
-
-    if (showBatchMatch) {
-        val renderedReviewUri = onlineAssociation?.track?.uri?.toString()
-        BatchLocalMatchSheet(
-            state = batchState,
-            filter = batchFilter,
-            onFilterChange = {
-                if (batchFilter != it) {
-                    batchFilter = it
-                    uiScope.launch { batchListState.scrollToItem(0) }
-                }
-            },
-            listState = batchListState,
-            savingUri = associationSavingUri,
-            onDismiss = {
-                if (viewModel.associationSavingUri.value == null) {
-                    viewModel.closeOnlineAssociation()
-                    reviewSession = null
-                    showBatchMatch = false
-                }
-            },
-            onStartOrResume = batchRepository::startOrResume,
-            onPause = batchRepository::pause,
-            onRetryUnmatched = batchRepository::retryUnmatched,
-            onRefresh = batchRepository::refresh,
-            onManualAssociation = { row -> beginReview(row) },
-            onLinkCandidate = { row, track ->
-                if (beginReview(row)) confirmReview(track, row.local.uri.toString())
-            },
-            associationState = onlineAssociation,
-            reviewPosition = reviewSession?.positionLabel,
-            onCloseReview = {
-                if (viewModel.associationSavingUri.value == null &&
-                    renderedReviewUri == viewModel.onlineAssociation.value?.track?.uri?.toString()) {
-                    viewModel.closeOnlineAssociation()
-                    reviewSession = null
-                }
-            },
-            onSkipReview = {
-                if (renderedReviewUri == viewModel.onlineAssociation.value?.track?.uri?.toString()) advanceReview()
-            },
-            onReviewQueryChange = viewModel::updateOnlineAssociationQuery,
-            onReviewSearch = { viewModel.searchOnlineAssociation() },
-            onReviewLoadMore = { viewModel.searchOnlineAssociation(loadMore = true) },
-            onReviewConfirm = { track -> confirmReview(track, renderedReviewUri) },
-            onStartReview = { beginReview() }
-        )
-    }
+    LocalTrackActionsHost(viewModel = viewModel, navigation = navigation)
 
     if (showImportSheet) {
         ImportSheet(
@@ -340,10 +201,7 @@ private fun HomeContent(
     playingMediaId: String?,
     isPlaying: Boolean,
     viewModel: LocalMusicViewModel,
-    navigation: LocalMusicNavigation,
-    batchState: BatchLocalMatchState,
-    onOpenBatchMatch: () -> Unit,
-    onStartBatchMatch: () -> Unit
+    navigation: LocalMusicNavigation
 ) {
     val recentTracks = remember(library) { library.tracks.sortedByDescending { it.dateAddedMs } }
 
@@ -354,9 +212,6 @@ private fun HomeContent(
                 onPlay = { viewModel.playTracks(recentTracks) },
                 onShuffle = { viewModel.playTracks(recentTracks, shuffle = true) }
             )
-        }
-        item(key = "batch_match") {
-            BatchMatchEntryCard(batchState, onOpenBatchMatch, onStartBatchMatch)
         }
         item(key = "entries") {
             QuickEntries(library = library, navigation = navigation)
@@ -457,43 +312,6 @@ private fun HomeContent(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun BatchMatchEntryCard(state: BatchLocalMatchState, onOpen: () -> Unit, onStart: () -> Unit) {
-    val matched = state.count(BatchLocalMatchStatus.MATCHED) + state.count(BatchLocalMatchStatus.ALREADY_LINKED)
-    val pending = state.count(BatchLocalMatchStatus.PENDING)
-    val errors = state.count(BatchLocalMatchStatus.ERROR)
-    val resumable = pending + errors + state.count(BatchLocalMatchStatus.NO_MATCH) + state.count(BatchLocalMatchStatus.NEEDS_CONFIRMATION)
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm)
-            .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = MelodiaSpacing.md, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).pressable(MelodiaPress.Card, onClick = onOpen)) {
-                Text("匹配网易云", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    if (state.isLoading) "正在读取本地关联…" else "已匹配 $matched · 待处理 $resumable",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Button(onClick = onOpen,
-                enabled = !state.isLoading) {
-                Text(when {
-                    state.isRunning -> "查看进度"
-                    resumable == 0 -> "查看结果"
-                    else -> "处理待处理"
-                })
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("逐首确认可连续处理；自动匹配重新核对未成功项。", modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (resumable > 0 && !state.isRunning) TextButton(onClick = onStart, enabled = !state.isLoading) { Text("自动匹配") }
         }
     }
 }

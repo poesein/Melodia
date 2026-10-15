@@ -43,6 +43,7 @@ import com.lin0721.linmusic.core.ui.components.ToastManager
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.feature.localmusic.domain.AuthorizedFolder
 import com.lin0721.linmusic.feature.localmusic.ui.LocalAudioAssociationTransferOptions
+import com.lin0721.linmusic.feature.localmusic.ui.LocalMatchingSettingsEntry
 import com.lin0721.linmusic.feature.player.ui.LyricCapsuleSlider
 import com.lin0721.linmusic.feature.settings.ui.SettingsGroupCard
 import com.lin0721.linmusic.feature.settings.ui.SettingsRow
@@ -87,6 +88,7 @@ fun LocalMusicSettingsScreen(
         ) {
             item(key = "associations") {
                 SettingsGroupCard("本地音频关联") {
+                    LocalMatchingSettingsEntry()
                     LocalAudioAssociationTransferOptions()
                 }
             }
