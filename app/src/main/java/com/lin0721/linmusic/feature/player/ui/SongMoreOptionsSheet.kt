@@ -48,6 +48,9 @@ import com.lin0721.linmusic.core.player.formatSleepTimerRemaining
 import kotlinx.coroutines.launch
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.feature.localmusic.ui.LocalAudioLinkOptions
+import com.lin0721.linmusic.core.model.Track
+import com.lin0721.linmusic.core.model.Artist
+import com.lin0721.linmusic.core.model.Album
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,7 +81,8 @@ fun SongMoreOptionsSheet(
     onShareClick: () -> Unit,
     onDownloadClick: () -> Unit,
     onDismiss: () -> Unit,
-    songId: Long = 0L
+    songId: Long = 0L,
+    onlineTrack: Track? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
@@ -227,7 +231,11 @@ fun SongMoreOptionsSheet(
 
             if (!isLocalOnly) {
                 if (!isPodcast) {
-                    LocalAudioLinkOptions(songId)
+                    LocalAudioLinkOptions(songId, onlineTrack?.takeIf { it.id == songId } ?: Track(
+                        id = songId, name = title, ar = listOf(Artist(name = artist)),
+                        al = Album(name = albumName, picUrl = coverUrl.takeIf {
+                            it.startsWith("https://") || it.startsWith("http://")
+                        }.orEmpty())))
                     // 5. 开始相似歌曲漫游
                     OptionRow(
                         icon = Icons.Rounded.Explore,

@@ -80,7 +80,9 @@ fun FullPlayerSheets(
     }
 
     if (showMoreOptionsSheet) {
-        val albumName = songState.songDetail?.al?.name ?: songState.songWiki?.album ?: "未知专辑"
+        val currentSongId = queue.getOrNull(currentQueueIndex)?.songId ?: songState.songDetail?.id ?: 0L
+        val detail = songState.songDetail?.takeIf { it.id == currentSongId }
+        val albumName = detail?.al?.name ?: if (songState.songDetail == null) songState.songWiki?.album ?: "未知专辑" else "未知专辑"
         SongMoreOptionsSheet(
             title = title,
             artist = artist,
@@ -106,7 +108,8 @@ fun FullPlayerSheets(
             onShareClick = onShareClick,
             onDownloadClick = onDownloadClick,
             onDismiss = onMoreOptionsDismiss,
-            songId = queue.getOrNull(currentQueueIndex)?.songId ?: songState.songDetail?.id ?: 0L
+            songId = currentSongId,
+            onlineTrack = detail
         )
     }
 

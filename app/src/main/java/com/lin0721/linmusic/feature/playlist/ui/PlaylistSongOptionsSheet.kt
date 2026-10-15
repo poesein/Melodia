@@ -56,7 +56,7 @@ fun PlaylistSongOptionsSheet(
     canRemoveFromPlaylist: Boolean = false,
     onRemoveFromPlaylist: (Long) -> Unit = {},
     onDownloadClick: ((Track) -> Unit)? = null,
-    // 本地曲目菜单使用本地→网易云关联入口，其余场景保留网易云→本地文件入口。
+    // 本地曲目菜单使用本地→网易云关联入口，其余场景从网易云歌曲选择本地曲库。
     showLocalAudioLinkOptions: Boolean = true,
     // 额外操作项
     extraOptions: @Composable ColumnScope.() -> Unit = {}
