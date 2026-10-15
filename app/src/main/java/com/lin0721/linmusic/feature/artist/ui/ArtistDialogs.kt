@@ -70,6 +70,7 @@ fun ArtistMoreMenuSheet(
     albumHasCustomMinimum: Boolean,
     onChangeAlbumMinimum: () -> Unit,
     catalogEnabled: Boolean,
+    catalogUsesDefault: Boolean = true,
     onCatalogSettings: () -> Unit,
     onBlockClick: () -> Unit,
     onDismiss: () -> Unit
@@ -110,7 +111,8 @@ fun ArtistMoreMenuSheet(
                 Column {
                     Text("主要录音室专辑（资料库）", color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text(if (catalogEnabled) "已开启 · MusicBrainz 分类，合并重复发行版" else "未开启 · 为此歌手单独设置",
+                    val catalogSource = if (catalogUsesDefault) "跟随全局" else "此歌手单独设置"
+                    Text("${if (catalogEnabled) "已开启" else "已关闭"} · $catalogSource",
                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             }
@@ -133,7 +135,7 @@ fun ArtistMoreMenuSheet(
                     Text("专辑最少曲数", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     val source = if (albumHasCustomMinimum) "此歌手单独设置" else "使用默认值"
                     Text(
-                        if (albumMinTracks == 0) "显示全部专辑 · $source" else "至少 $albumMinTracks 首 · $source",
+                        if (albumMinTracks == 0) "不限制曲数 · $source" else "至少 $albumMinTracks 首 · $source",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )

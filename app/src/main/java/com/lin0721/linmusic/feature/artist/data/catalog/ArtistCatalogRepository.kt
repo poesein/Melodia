@@ -1,10 +1,6 @@
 package com.lin0721.linmusic.feature.artist.data.catalog
 
 import android.content.Context
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogArtist
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogCredit
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogPreference
@@ -27,7 +23,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -50,8 +45,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-
-private val Context.artistCatalogDataStore by preferencesDataStore(name = "artist_album_catalog")
 
 class ArtistCatalogException(
     message: String,
@@ -80,6 +73,12 @@ class ArtistCatalogRepository internal constructor(
     private val cacheMutexes = ConcurrentHashMap<String, Mutex>()
 
     fun selection(artistId: Long): Flow<ArtistCatalogPreference> = preferences.observe(validArtistId(artistId))
+
+    val defaultEnabled: Flow<Boolean> get() = preferences.defaultEnabled
+
+    suspend fun setDefaultEnabled(enabled: Boolean) = preferences.setDefaultEnabled(enabled)
+
+    suspend fun clearEnabledOverride(artistId: Long) = preferences.clearEnabledOverride(validArtistId(artistId))
 
     suspend fun setEnabled(artistId: Long, enabled: Boolean) = preferences.setEnabled(validArtistId(artistId), enabled)
 
@@ -270,35 +269,6 @@ private data class ArtistCatalogCacheRecord(
     val lastError: String? = null,
     val lastStatus: Int? = null
 )
-
-internal interface ArtistCatalogPreferenceStorage {
-    fun observe(artistId: Long): Flow<ArtistCatalogPreference>
-    suspend fun setEnabled(artistId: Long, enabled: Boolean)
-    suspend fun bind(artistId: Long, mbid: String, name: String?)
-    suspend fun clearBinding(artistId: Long)
-}
-
-private class AndroidArtistCatalogPreferences(private val context: Context) : ArtistCatalogPreferenceStorage {
-    private fun enabled(id: Long) = booleanPreferencesKey("artist_${id}_catalog_enabled")
-    private fun mbid(id: Long) = stringPreferencesKey("artist_${id}_catalog_mbid")
-    private fun name(id: Long) = stringPreferencesKey("artist_${id}_catalog_name")
-    override fun observe(artistId: Long) = context.artistCatalogDataStore.data.map {
-        ArtistCatalogPreference(it[enabled(artistId)] ?: false, it[mbid(artistId)], it[name(artistId)])
-    }
-    override suspend fun setEnabled(artistId: Long, enabled: Boolean) {
-        context.artistCatalogDataStore.edit { it[this.enabled(artistId)] = enabled }
-    }
-    override suspend fun bind(artistId: Long, mbid: String, name: String?) {
-        context.artistCatalogDataStore.edit {
-            it[this.mbid(artistId)] = mbid
-            it.remove(this.name(artistId))
-            name?.let { value -> it[this.name(artistId)] = value }
-        }
-    }
-    override suspend fun clearBinding(artistId: Long) {
-        context.artistCatalogDataStore.edit { it.remove(mbid(artistId)); it.remove(name(artistId)) }
-    }
-}
 
 internal data class ArtistCatalogHttpResponse(val status: Int, val body: String, val retryAfterSeconds: Long? = null)
 internal fun interface ArtistCatalogTransport { suspend fun get(url: HttpUrl): ArtistCatalogHttpResponse }

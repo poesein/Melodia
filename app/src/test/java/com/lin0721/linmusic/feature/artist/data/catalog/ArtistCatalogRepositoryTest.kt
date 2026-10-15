@@ -7,6 +7,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -29,9 +30,16 @@ class ArtistCatalogRepositoryTest {
 
     private class Preferences : ArtistCatalogPreferenceStorage {
         val data = MutableStateFlow<Map<Long, ArtistCatalogPreference>>(emptyMap())
-        override fun observe(artistId: Long) = data.map { it[artistId] ?: ArtistCatalogPreference() }
+        override val defaultEnabled = MutableStateFlow(true)
+        override fun observe(artistId: Long) = combine(data, defaultEnabled) { values, default ->
+            (values[artistId] ?: ArtistCatalogPreference()).copy(defaultEnabled = default)
+        }
+        override suspend fun setDefaultEnabled(enabled: Boolean) { defaultEnabled.value = enabled }
         override suspend fun setEnabled(artistId: Long, enabled: Boolean) {
-            data.value += artistId to (data.value[artistId] ?: ArtistCatalogPreference()).copy(enabled = enabled)
+            data.value += artistId to (data.value[artistId] ?: ArtistCatalogPreference()).copy(enabledOverride = enabled)
+        }
+        override suspend fun clearEnabledOverride(artistId: Long) {
+            data.value += artistId to (data.value[artistId] ?: ArtistCatalogPreference()).copy(enabledOverride = null)
         }
         override suspend fun bind(artistId: Long, mbid: String, name: String?) {
             data.value += artistId to (data.value[artistId] ?: ArtistCatalogPreference()).copy(artistMbid = mbid, artistName = name)
@@ -219,7 +227,7 @@ class ArtistCatalogRepositoryTest {
         val repo = repository(preferences = prefs, transport = ArtistCatalogTransport { error("Settings must not fetch metadata") })
         assertEquals(ArtistCatalogPreference(), repo.selection(123L).first())
         repo.bindArtist(123L, artistId.uppercase(), " Bon Iver ")
-        assertEquals(ArtistCatalogPreference(false, artistId, "Bon Iver"), repo.selection(123L).first())
+        assertEquals(ArtistCatalogPreference(artistMbid = artistId, artistName = "Bon Iver"), repo.selection(123L).first())
         repo.setEnabled(123L, true)
         repo.setEnabled(456L, true)
         repo.bindArtist(456L, otherArtistId, "Other")
@@ -227,7 +235,7 @@ class ArtistCatalogRepositoryTest {
         assertEquals(artistId, repo.selection(123L).first().artistMbid)
         assertEquals(otherArtistId, repo.selection(456L).first().artistMbid)
         repo.clearBinding(456L)
-        assertEquals(ArtistCatalogPreference(enabled = true), repo.selection(456L).first())
+        assertEquals(ArtistCatalogPreference(enabledOverride = true), repo.selection(456L).first())
         assertEquals("Bon Iver", repo.selection(123L).first().artistName)
         repo.setEnabled(0L, true)
         assertTrue(repo.selection(0L).first().enabled)

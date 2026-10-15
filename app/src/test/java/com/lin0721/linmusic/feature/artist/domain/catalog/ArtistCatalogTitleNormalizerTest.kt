@@ -35,6 +35,30 @@ class ArtistCatalogTitleNormalizerTest {
     }
 
     @Test
+    fun superDeluxeAndNestedRemasterDescriptionsResolveToTheOriginalAlbum() {
+        listOf(
+            "The Joshua Tree (Super Deluxe)",
+            "The Joshua Tree (Super Deluxe Edition (2017 Remastered))",
+            "The Joshua Tree (2017 Remastered) Super Deluxe Edition",
+            "The Joshua Tree [Deluxe Edition / 30th Anniversary]",
+            "The Joshua Tree (Re-mastered Version)",
+            "The Joshua Tree — 30th Anniversary Super Deluxe Edition",
+            "The Joshua Tree (2017 Remastered) (US Version) (Digital Edition) (Deluxe Edition) (Limited Edition)"
+        ).forEach { assertEquals(it, "thejoshuatree", normalizer.baseTitle(it)) }
+    }
+
+    @Test
+    fun fullwidthNestedDescriptorsNormalizeBeforeParsingAndRecordingSuffixesRemain() {
+        assertEquals("thejoshuatree", normalizer.baseTitle("Ｔｈｅ Ｊｏｓｈｕａ Ｔｒｅｅ（Ｓｕｐｅｒ Ｄｅｌｕｘｅ Ｅｄｉｔｉｏｎ）"))
+        listOf(
+            "The Joshua Tree (Live) (Super Deluxe Edition)",
+            "The Joshua Tree (Super Deluxe Live Edition)",
+            "The Joshua Tree (2017 Remastered / Acoustic)",
+            "The Joshua Tree (Super Deluxe Edition (Live))"
+        ).forEach { assertTrue(it, normalizer.baseTitle(it).contains("live") || normalizer.baseTitle(it).contains("acoustic")) }
+    }
+
+    @Test
     fun converterCanBeInjectedAndSupplementaryUnicodeLettersArePreserved() {
         val identity = ArtistCatalogTitleNormalizer { it }
         assertEquals("𠮷野家", identity.normalizeTitle("𠮷野家"))

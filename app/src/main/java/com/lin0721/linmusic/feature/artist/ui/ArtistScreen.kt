@@ -125,6 +125,7 @@ fun ArtistScreen(
                     onResetAlbumMinTracks = viewModel::resetAlbumMinTracks,
                     catalogState = activeCatalogState,
                     onCatalogEnabledChanged = catalogViewModel::setEnabled,
+                    onCatalogFollowDefault = catalogViewModel::followDefault,
                     onCatalogQueryChanged = catalogViewModel::updateQuery,
                     onCatalogSearch = catalogViewModel::searchArtists,
                     onCatalogBind = catalogViewModel::bind,

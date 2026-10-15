@@ -71,6 +71,7 @@ fun ArtistContent(
     onResetAlbumMinTracks: () -> Unit,
     catalogState: ArtistCatalogUiState,
     onCatalogEnabledChanged: (Boolean) -> Unit,
+    onCatalogFollowDefault: () -> Unit,
     onCatalogQueryChanged: (String) -> Unit,
     onCatalogSearch: () -> Unit,
     onCatalogBind: (ArtistCatalogArtist) -> Unit,
@@ -175,7 +176,8 @@ fun ArtistContent(
                 visibleCount = visibleAlbums.size,
                 hasMore = albumsHasMore,
                 loading = albumsLoadingMore,
-                error = albumsLoadError
+                error = albumsLoadError,
+                completeCatalog = catalogState.enabled
             )) onLoadMoreAlbums()
         }
     }
@@ -283,6 +285,7 @@ fun ArtistContent(
                     )
                     1 -> artistAlbumTab(
                         albums = visibleAlbums,
+                        sourceAlbumCount = albums.size,
                         minTracks = albumMinTracks,
                         catalogState = catalogState,
                         catalogSelection = catalogSelection,
@@ -388,6 +391,7 @@ fun ArtistContent(
                 albumHasCustomMinimum = albumHasCustomMinimum,
                 onChangeAlbumMinimum = { showAlbumMinimumDialog = true },
                 catalogEnabled = catalogState.enabled,
+                catalogUsesDefault = catalogState.enabledOverride == null,
                 onCatalogSettings = { showCatalogSheet = true },
                 onBlockClick = onBlockClick,
                 onDismiss = { showMoreMenuSheet = false }
@@ -396,7 +400,7 @@ fun ArtistContent(
         if (showAlbumMinimumDialog) {
             ArtistAlbumMinimumDialog(
                 currentMinimum = albumMinTracks,
-                description = "仅为 ${artist.name} 设置，0 首显示全部。其他歌手不受影响；默认 $albumDefaultMinTracks 首。",
+                description = "仅为 ${artist.name} 设置，0 首不限制曲数。其他歌手不受影响；默认 $albumDefaultMinTracks 首。",
                 onSave = onAlbumMinTracksChanged,
                 onUseDefault = if (albumHasCustomMinimum) onResetAlbumMinTracks else null,
                 defaultMinimum = albumDefaultMinTracks,
@@ -409,6 +413,7 @@ fun ArtistContent(
                 state = catalogState,
                 selection = catalogSelection,
                 onEnabledChanged = onCatalogEnabledChanged,
+                onFollowDefault = onCatalogFollowDefault,
                 onQueryChanged = onCatalogQueryChanged,
                 onSearch = onCatalogSearch,
                 onBind = onCatalogBind,

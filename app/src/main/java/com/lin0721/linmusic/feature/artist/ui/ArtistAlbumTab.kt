@@ -21,6 +21,7 @@ import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogStatus
 // 专辑 Tab: 采用精致的行模式展示，滚动到底自动追加下一页
 fun LazyListScope.artistAlbumTab(
     albums: List<ArtistAlbum>,
+    sourceAlbumCount: Int,
     minTracks: Int,
     catalogState: ArtistCatalogUiState,
     catalogSelection: ArtistCatalogSelection?,
@@ -37,6 +38,15 @@ fun LazyListScope.artistAlbumTab(
         Column(Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm)) {
             Text("主要录音室专辑 · MusicBrainz", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
             ArtistCatalogStatus(catalogState, catalogSelection)
+            Text(
+                when {
+                    loadError != null -> "网易云专辑列表尚未读完，已加载 $sourceAlbumCount 张；请重试加载。"
+                    hasMore -> "正在读取完整专辑列表…已加载 $sourceAlbumCount 张"
+                    else -> "已读取完整网易云专辑列表，共 $sourceAlbumCount 张"
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp
+            )
             Row {
                 TextButton(onClick = onCatalogSettings) { Text("资料库设置") }
                 if (catalogState.error != null) TextButton(onClick = onCatalogRetry, enabled = !catalogState.loading) { Text("重试") }

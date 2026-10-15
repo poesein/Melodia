@@ -1,10 +1,12 @@
 # 按音乐资料库筛选歌手主要录音室专辑
 
-beta.6 保留 beta.5 的全部功能，新增可选的 MusicBrainz 专辑目录匹配。它使用资料库的作品分类，不按热度或评分推荐“最好”的专辑。
+beta.7 保留已有本地优先、搜索和曲数筛选功能。MusicBrainz 专辑目录筛选现在默认开启，使用资料库的作品分类，不按热度或评分推荐“最好”的专辑。
 
 ## 使用
 
-歌手详情 → 三个竖点 → **主要录音室专辑（资料库）**。开启仅影响当前网易歌手 ID，开关及资料库歌手绑定各自保存。默认关闭，继续使用原曲数筛选。
+**设置 → 扩展 → 歌手专辑**统一管理资料库筛选，默认开启。未单独设置的歌手跟随全局开关；只有实际访问歌手时才按需读取资料，不批量抓取所有歌手。
+
+歌手详情 → 三个竖点 → **主要录音室专辑（资料库）**，可单独开启或关闭，或恢复跟随全局。最低曲数入口仍保留，每位歌手独立保存；0 首表示不限制曲数。beta.6 已保存的明确开关与歌手绑定原样保留，全局切换不会覆盖个人例外。
 
 第一次按名称、别名和已有专辑核对身份：只有唯一精确名称候选与至少两张不同专辑交叉命中时自动绑定；否则点选正确的资料库歌手。之后复用绑定，不需要反复选。
 
@@ -14,9 +16,19 @@ beta.6 保留 beta.5 的全部功能，新增可选的 MusicBrainz 专辑目录�
 
 以 MusicBrainz Release Group 为原专辑组：`primary-type=Album`，且明确提供空的 `secondary-types`，才进入普通专辑候选。Single、EP、Live、Compilation、Remix 及其他附加类型排除；缺少类型信息不当作录音室专辑。不会因为《Live for Today》的标题含 Live 就排除。
 
-同组的明确重制、地区、豪华等发行后缀可归并，按完整标题、原发行日期等证据选择网易代表专辑。不同录音、现场及语言版本不靠模糊相似度强行归并。匹配支持大小写、常见标点以及简繁字符折叠；翻译标题或歧义名称可能仍未识别。
+同组的明确重制、地区、豪华、Super Deluxe 等发行后缀可归并，支持连续后缀及嵌套括号。按完整标题、原发行日期等证据选择网易代表专辑，并按资料库原专辑发行时间排列。不同录音、现场及语言版本不靠模糊相似度强行归并。匹配支持大小写、常见标点以及简繁字符折叠；翻译标题或歧义名称可能仍未识别。
 
-页面显示当前已加载网易专辑的匹配、未识别、合并和排除数量。过滤后当前页为空仍继续分页。未识别项不在筛选列表，可以恢复全部查看。
+网易云明确的 `type=专辑/Album/Single/EP` 可帮助区分同名专辑与单曲、访谈。不会用 `subType=录音室版` 覆盖 MusicBrainz 的 Live、Remix 等分类，因为源数据存在误标。
+
+开启资料库筛选并进入专辑页时，会自动读完网易云所有专辑页，无需不断滚动。读取期间显示已加载数量和进度，暂时可见的匹配继续展示；失败或重复空页会暂停并提供重试。分页依据服务器 `more` 和实际原始行数，不使用可能过时的歌手专辑总数。关闭筛选继续按原列表滚动加载。
+
+页面显示已加载网易专辑的匹配、未识别、合并和排除数量。未识别项不在筛选列表，可以恢复全部查看。
+
+## U2 回归核查
+
+2026-10-15 读取网易云 164 条专辑和 MusicBrainz 203 个发行组。beta.6 漏项原因包括没有读完源分页、《The Joshua Tree》的同名访谈冲突、《The Unforgettable Fire》的同名单曲冲突和 Super Deluxe 后缀。新增完整元数据回放测试，要求 14 张已发行且无次类型的 Album 全部匹配。
+
+《Rattle and Hum》在资料库标为 Soundtrack，官方也说明它混合现场表演与新录音，当前主要录音室规则仍排除。可在该歌手菜单关闭筛选查看原列表。数据库并不保证每位歌手的目录完整或分类正确。
 
 ## 数据边界与联网
 
@@ -30,6 +42,7 @@ beta.6 保留 beta.5 的全部功能，新增可选的 MusicBrainz 专辑目录�
 
 - [MusicBrainz Release Group](https://musicbrainz.org/doc/Release_Group)
 - [MusicBrainz 类型定义](https://musicbrainz.org/doc/Release_Group/Type)
+- [U2《Rattle and Hum》官方说明](https://www.u2.com/products/rattle-and-hum)
 - [MusicBrainz API 限频和 User-Agent](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)
 - [Sony《THE ASHTRAY》发行说明](https://www.sonymusic.co.jp/artist/Suchmos/discography/KSJL-6200)
 - [OpenCC TSCharacters 字表](https://github.com/BYVoid/OpenCC/blob/master/data/dictionary/TSCharacters.txt)

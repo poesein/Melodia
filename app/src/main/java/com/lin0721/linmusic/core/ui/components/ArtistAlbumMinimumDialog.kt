@@ -54,7 +54,7 @@ fun ArtistAlbumMinimumDialog(
                     suffix = { Text("首") },
                     singleLine = true,
                     isError = minimum == null,
-                    supportingText = { Text("0 显示全部；可设置 ${ArtistAlbumFilterSettings.MIN_TRACKS}–${ArtistAlbumFilterSettings.MAX_TRACKS} 首") },
+                    supportingText = { Text("0 不限制曲数；可设置 ${ArtistAlbumFilterSettings.MIN_TRACKS}–${ArtistAlbumFilterSettings.MAX_TRACKS} 首") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { save() })
                 )

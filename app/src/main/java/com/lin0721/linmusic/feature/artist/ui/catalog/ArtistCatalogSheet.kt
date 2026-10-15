@@ -44,6 +44,7 @@ fun ArtistCatalogSheet(
     state: ArtistCatalogUiState,
     selection: ArtistCatalogSelection?,
     onEnabledChanged: (Boolean) -> Unit,
+    onFollowDefault: () -> Unit,
     onQueryChanged: (String) -> Unit,
     onSearch: () -> Unit,
     onBind: (ArtistCatalogArtist) -> Unit,
@@ -64,15 +65,21 @@ fun ArtistCatalogSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("主要录音室专辑", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("仅为 $artistName 设置", style = MaterialTheme.typography.bodySmall,
+                    Text(if (state.enabledOverride == null) "$artistName · 跟随全局（${if (state.defaultEnabled) "开启" else "关闭"}）"
+                        else "$artistName · 此歌手单独设置", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(checked = state.enabled, onCheckedChange = onEnabledChanged, enabled = !state.saving)
             }
+            if (state.enabledOverride != null) {
+                TextButton(onClick = onFollowDefault, enabled = !state.saving) {
+                    Text("恢复跟随全局（${if (state.defaultEnabled) "开启" else "关闭"}）")
+                }
+            }
             Text("使用 MusicBrainz 音乐资料库的专辑分类，合并同一专辑的重制、地区等发行版本。单曲、EP、现场、精选和混音专辑不在此列表。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!state.enabled) {
-                Text("目前使用网易云原专辑列表和已有曲数设置。开启后查找资料库歌手；无法确认的专辑不假定为录音室专辑。",
+                Text("目前使用网易云原专辑列表和已有曲数设置。开启此开关仅为该歌手单独设置；全局开关在设置 → 扩展 → 歌手专辑中管理。",
                     style = MaterialTheme.typography.bodyMedium)
             } else {
                 ArtistCatalogStatus(state, selection)

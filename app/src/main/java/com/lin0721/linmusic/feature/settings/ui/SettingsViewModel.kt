@@ -9,6 +9,7 @@ import com.lin0721.linmusic.core.preferences.BottomBarItemSetting
 import com.lin0721.linmusic.core.preferences.BottomBarLayout
 import com.lin0721.linmusic.core.preferences.SettingsPreferences
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
+import com.lin0721.linmusic.feature.artist.data.catalog.ArtistCatalogRepository
 import com.lin0721.linmusic.core.preferences.UiScale
 import com.lin0721.linmusic.core.preferences.ArtistAlbumFilterSettings
 import com.lin0721.linmusic.core.auth.UserPreferences
@@ -45,7 +46,8 @@ class SettingsViewModel(
     private val userPreferences: UserPreferences,
     private val authRepository: AuthRepository,
     private val resourceProvider: ResourceProvider,
-    private val preferredLocalAudio: PreferredLocalAudioRepository
+    private val preferredLocalAudio: PreferredLocalAudioRepository,
+    private val artistCatalog: ArtistCatalogRepository
 ) : ViewModel() {
 
     // DataStore 的偏好流统一以相同策略转为 StateFlow，避免每项重复五行样板
@@ -137,6 +139,7 @@ class SettingsViewModel(
 
     val uiScalePercent = settingsPreferences.uiScalePercent.asState(UiScale.DEFAULT_PERCENT)
     val artistAlbumMinTracks = settingsPreferences.artistAlbumMinTracks.asState(ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS)
+    val artistCatalogDefaultEnabled = artistCatalog.defaultEnabled.asState(true)
 
     val lyricTextSize = settingsPreferences.lyricTextSize.asState(14)
 
@@ -389,6 +392,7 @@ class SettingsViewModel(
 
     fun updateUiScalePercent(percent: Int) = launchSave { settingsPreferences.saveUiScalePercent(percent) }
     fun updateArtistAlbumMinTracks(minimum: Int) = launchSave { settingsPreferences.saveArtistAlbumMinTracks(minimum) }
+    fun updateArtistCatalogDefaultEnabled(enabled: Boolean) = launchSave { artistCatalog.setDefaultEnabled(enabled) }
 
     fun updateLyricTextSize(size: Int) = launchSave { settingsPreferences.saveLyricTextSize(size) }
 

@@ -3,6 +3,9 @@ package com.lin0721.linmusic.feature.artist.domain.catalog
 import com.lin0721.linmusic.core.model.ArtistAlbum
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -11,8 +14,8 @@ class ArtistCatalogMatcherTest {
                       date: String? = null, aliases: List<String> = emptyList(), artist: String = "correct-artist") =
         ArtistCatalogReleaseGroup(id, title, date, primary, secondary, aliases, listOf(ArtistCatalogCredit(artist, "Artist")))
 
-    private fun album(id: Long, title: String, date: String? = null, size: Int = 10) = ArtistAlbum(
-        id = id, name = title, size = size,
+    private fun album(id: Long, title: String, date: String? = null, size: Int = 10, type: String? = null) = ArtistAlbum(
+        id = id, name = title, size = size, type = type,
         publishTime = date?.let { LocalDate.parse(it).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() } ?: 0
     )
 
@@ -171,4 +174,141 @@ class ArtistCatalogMatcherTest {
         assertEquals(listOf("b", "c"), ArtistCatalogMatcher.exactNameCandidates(artists, listOf("Artist")).map { it.id })
         assertFalse(ArtistCatalogMatcher.identityEvidence(emptyList(), emptyList()).canAutoBind)
     }
+
+    @Test
+    fun u2JoshuaTreeAlbumDoesNotCollideWithTheSameNameInterview() {
+        val groups = listOf(
+            group("6f3e9fa6-be7a-3de8-a2b2-2072ece8a54d", "The Joshua Tree", date = "1987-03-09"),
+            group("f997cb8f-f393-46e5-87eb-5a152e0a2480", "The Joshua Tree", primary = "Other", secondary = listOf("Interview"), date = "2006")
+        )
+        val result = ArtistCatalogMatcher.select(listOf(
+            album(2021179, "The Joshua Tree", "1987-03-09", 11, "专辑"),
+            album(175254346, "The Joshua Tree (Super Deluxe)", "2017-06-02", 49, "专辑"),
+            album(34463596, "The Joshua Tree (Deluxe Edition) [Remastered]", "1987-03-09", 25, "专辑")
+        ), groups)
+        assertEquals(listOf(2021179L), result.albums.map { it.id })
+        assertEquals(2, result.duplicateCount)
+        assertTrue(result.ambiguousAlbums.isEmpty())
+        assertEquals("6f3e9fa6-be7a-3de8-a2b2-2072ece8a54d", result.matches.single().group.id)
+    }
+
+    @Test
+    fun u2UnforgettableFireUsesSourcePrimaryTypeBecauseAlbumAndSingleShareTheirYear() {
+        val groups = listOf(
+            group("c84d00f4-afd3-3184-be62-6ae5f135aa38", "The Unforgettable Fire", date = "1984-10-01"),
+            group("e3925636-f3a0-3fbd-b59e-c54391a71a58", "The Unforgettable Fire", primary = "Single", date = "1984")
+        )
+        val original = album(2021143, "The Unforgettable Fire", "1984-10-01", 10, "专辑")
+        val result = ArtistCatalogMatcher.select(listOf(original, album(2, original.name, "1984-10-01", 1, "Single")), groups)
+        assertEquals(listOf(2021143L), result.albums.map { it.id })
+        assertEquals(listOf(2L), result.excludedAlbums.map { it.id })
+        assertEquals("c84d00f4-afd3-3184-be62-6ae5f135aa38", result.matches.single().group.id)
+        assertEquals(1, ArtistCatalogMatcher.select(listOf(original.copy(type = null)), groups).ambiguousAlbums.size)
+    }
+
+    @Test
+    fun anExplicitSourceAlbumLabelCannotReplaceAnExactCatalogEpWithItsStrippedStudioTitle() {
+        val groups = listOf(group("original", "A"), group("ep", "A (Deluxe Edition)", primary = "EP"))
+        val result = ArtistCatalogMatcher.select(listOf(album(1, "A (Deluxe Edition)", type = "Album")), groups)
+        assertTrue(result.albums.isEmpty())
+        assertEquals(1, result.excludedCount)
+        assertEquals(1, ArtistCatalogMatcher.select(listOf(album(1, "A (Deluxe Edition)")), groups).excludedCount)
+    }
+
+    @Test
+    fun sourceTypeCannotPromoteAnExplicitSingleOrBypassLiveClassification() {
+        val result = ArtistCatalogMatcher.select(listOf(
+            album(1, "A", type = "Single"),
+            album(2, "Under a Blood Red Sky (Live)", type = "专辑")
+        ), listOf(group("studio", "A"), group("live", "Under a Blood Red Sky (Live)", secondary = listOf("Live"))))
+        assertTrue(result.albums.isEmpty())
+        assertEquals(2, result.excludedCount)
+    }
+
+    @Test
+    fun unknownSourceTypesAndSameTypeGroupCollisionsRemainAmbiguous() {
+        val albumAndSingle = listOf(group("album", "A"), group("single", "A", primary = "Single"))
+        assertEquals(1, ArtistCatalogMatcher.select(listOf(album(1, "A", type = "unrecognized")), albumAndSingle).ambiguousAlbums.size)
+        val studioAndLive = listOf(group("studio", "A"), group("live", "A", secondary = listOf("Live")))
+        assertEquals(1, ArtistCatalogMatcher.select(listOf(album(1, "A", type = "Album")), studioAndLive).ambiguousAlbums.size)
+        assertEquals(1, ArtistCatalogMatcher.select(listOf(album(1, "A", type = "Album")), listOf(group("unknown", "A", secondary = null))).unmatchedCount)
+    }
+
+    @Test
+    fun aCatalogOriginalTitleThatContainsEditionWordsStillWinsBeforeStripping() {
+        val result = ArtistCatalogMatcher.select(
+            listOf(album(1, "A (Super Deluxe)", type = "Album")),
+            listOf(group("base", "A"), group("original", "A (Super Deluxe)"))
+        )
+        assertEquals("original", result.matches.single().group.id)
+        assertEquals(ArtistCatalogTitleMatch.TITLE, result.matches.single().titleMatch)
+    }
+
+    @Test
+    fun sourcePrimaryTypeDoesNotBypassTheBoundArtistCredit() {
+        val result = ArtistCatalogMatcher.select(
+            listOf(album(1, "A", type = "专辑")),
+            listOf(group("wrong", "A", artist = "someone-else"), group("right-single", "A", primary = "Single")),
+            boundArtistMbid = "correct-artist"
+        )
+        assertTrue(result.albums.isEmpty())
+        assertEquals(1, result.excludedCount)
+    }
+
+    @Test
+    fun albumChronologyUsesTheCatalogOriginalReleaseRatherThanTheStreamingRemasterDate() {
+        val result = ArtistCatalogMatcher.select(
+            listOf(album(1, "Old (Super Deluxe)", "2025-01-01"), album(2, "New", "2017-01-01"), album(3, "Undated")),
+            listOf(group("old", "Old", date = "1987-03-09"), group("new", "New", date = "2017-12-01"), group("undated", "Undated", date = "invalid"))
+        )
+        assertEquals(listOf(2L, 1L, 3L), result.albums.map { it.id })
+        assertEquals(result.albums.map { it.id }, result.matches.map { it.album.id })
+    }
+
+    @Test
+    fun actualAllThatYouCannotLeaveBehindAnniversaryNameCollapsesWithoutSubstringGuessing() {
+        val result = ArtistCatalogMatcher.select(listOf(
+            album(97578742, "All That You Can’t Leave Behind (20th Anniversary Edition / Super Deluxe / Remastered 2020)", "2000-10-30", 51, "专辑"),
+            album(2, "All That You Can’t Leave Behind (Live)", type = "专辑"),
+            album(3, "All That You Can’t Leave Behind Instrumentals", type = "专辑")
+        ), listOf(group("88c59b55-200d-3ac1-beff-8eb99830807e", "All That You Can’t Leave Behind", date = "2000-10-30")))
+        assertEquals(listOf(97578742L), result.albums.map { it.id })
+        assertEquals(2, result.unmatchedCount)
+    }
+
+    @Test
+    fun completeU2CatalogReplayKeepsAllFourteenIssuedOrdinaryAlbumsAndAccountsForEverySourceRecord() {
+        // Public metadata captured from the complete NetEase and MusicBrainz responses on
+        // 2026-10-15. The fixture deliberately contains the singles, interviews and live
+        // groups that collided with the classic albums; it is not a studio-only whitelist.
+        val fixtureText = requireNotNull(javaClass.getResourceAsStream("/catalog/u2-full-replay-2026-10-15.json"))
+            .bufferedReader().use { it.readText() }
+        val fixture = Json { ignoreUnknownKeys = true }.decodeFromString<U2Replay>(fixtureText)
+        assertEquals(104493L, fixture.artistId)
+        assertEquals(164, fixture.albums.size)
+        assertEquals(203, fixture.groups.size)
+        val result = ArtistCatalogMatcher.select(fixture.albums, fixture.groups, boundArtistMbid = fixture.artistMbid)
+        assertEquals(setOf(
+            "Boy", "October", "War", "The Unforgettable Fire", "The Joshua Tree", "Achtung Baby", "Zooropa", "Pop",
+            "All That You Can’t Leave Behind", "How to Dismantle an Atomic Bomb", "No Line on the Horizon",
+            "Songs of Innocence", "Songs of Experience", "Songs of Surrender"
+        ), result.matches.map { it.group.title }.toSet())
+        assertEquals(14, result.matchedCount)
+        assertTrue(result.albums.any { it.id == 2021179L })
+        assertTrue(result.albums.any { it.id == 2021143L })
+        assertFalse(result.albums.any { it.id == 2021187L }) // Rattle and Hum has catalog Soundtrack secondary types.
+        assertTrue(result.excludedAlbums.any { it.id == 2021187L })
+        assertEquals(164, result.matchedCount + result.duplicateCount + result.excludedCount + result.unmatchedCount)
+        assertEquals(164, (result.albums + result.duplicateAlbums + result.excludedAlbums + result.unmatchedAlbums + result.ambiguousAlbums)
+            .map { it.id }.toSet().size)
+        assertTrue(result.unmatchedReleaseGroups.any { it.title == "Carnaval de Luz" }) // Announced for 2026-11-13, absent online.
+    }
+
+    @Serializable
+    private data class U2Replay(
+        val artistId: Long,
+        val artistMbid: String,
+        val albums: List<ArtistAlbum>,
+        val groups: List<ArtistCatalogReleaseGroup>
+    )
 }

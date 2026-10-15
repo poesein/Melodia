@@ -36,10 +36,14 @@ data class ArtistCatalogReleaseGroup(
 
 @Serializable
 data class ArtistCatalogPreference(
-    val enabled: Boolean = false,
+    /** A missing artist key follows the global setting; existing beta.6 keys remain explicit. */
+    val enabledOverride: Boolean? = null,
     val artistMbid: String? = null,
-    val artistName: String? = null
-)
+    val artistName: String? = null,
+    val defaultEnabled: Boolean = true
+) {
+    val enabled: Boolean get() = enabledOverride ?: defaultEnabled
+}
 
 enum class ArtistCatalogClassification { ORDINARY_ALBUM, EXCLUDED, UNKNOWN }
 enum class ArtistCatalogTitleMatch { TITLE, ALIAS, EDITION }

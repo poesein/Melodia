@@ -9,14 +9,19 @@ import com.lin0721.linmusic.feature.artist.data.catalog.ArtistCatalogRepository
 import com.lin0721.linmusic.feature.artist.data.catalog.ArtistCatalogRequestGate
 import com.lin0721.linmusic.feature.artist.data.catalog.ArtistCatalogTransport
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogPreference
+import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,7 +42,7 @@ class ArtistCatalogViewModelTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
         val transport = FakeTransport()
-        val preferences = FakePreferences()
+        val preferences = FakePreferences(ArtistCatalogPreference(enabledOverride = false))
         val repository = repository(preferences, transport, dispatcher)
         val model = ArtistCatalogViewModel(repository)
         val store = ViewModelStore().apply { put("catalog", model) }
@@ -55,7 +60,7 @@ class ArtistCatalogViewModelTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
         val transport = FakeTransport()
-        val preferences = FakePreferences(ArtistCatalogPreference(enabled = true))
+        val preferences = FakePreferences()
         val model = ArtistCatalogViewModel(repository(preferences, transport, dispatcher))
         val store = ViewModelStore().apply { put("catalog", model) }
         try {
@@ -73,7 +78,7 @@ class ArtistCatalogViewModelTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
         val transport = FakeTransport()
-        val preferences = FakePreferences(ArtistCatalogPreference(enabled = true))
+        val preferences = FakePreferences()
         val model = ArtistCatalogViewModel(repository(preferences, transport, dispatcher))
         val store = ViewModelStore().apply { put("catalog", model) }
         try {
@@ -136,6 +141,226 @@ class ArtistCatalogViewModelTest {
         } finally { store.clear(); Dispatchers.resetMain() }
     }
 
+    @Test fun globalChangesRefreshOpenArtistWhileExplicitOffRemainsAndResetFollowsGlobal() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val transport = FakeTransport()
+        val preferences = FakePreferences(ArtistCatalogPreference(artistMbid = MBID, artistName = "Example Artist"))
+        val model = ArtistCatalogViewModel(repository(preferences, transport, dispatcher))
+        val store = ViewModelStore().apply { put("catalog", model) }
+        try {
+            model.updateArtistContext(artist, albums)
+            advanceUntilIdle()
+            assertTrue(model.state.value.enabled)
+            assertNull(model.state.value.enabledOverride)
+            assertEquals(2, model.state.value.groups?.size)
+            preferences.setDefaultEnabled(false)
+            advanceUntilIdle()
+            assertFalse(model.state.value.enabled)
+            assertFalse(model.state.value.defaultEnabled)
+            assertEquals(MBID, model.state.value.artistMbid)
+            model.setEnabled(false)
+            advanceUntilIdle()
+            preferences.setDefaultEnabled(true)
+            advanceUntilIdle()
+            assertFalse(model.state.value.enabled)
+            assertTrue(model.state.value.defaultEnabled)
+            assertEquals(false, model.state.value.enabledOverride)
+            val requests = transport.requests
+            model.followDefault()
+            advanceUntilIdle()
+            assertTrue(model.state.value.enabled)
+            assertNull(model.state.value.enabledOverride)
+            assertEquals(MBID, model.state.value.artistMbid)
+            assertEquals(2, model.state.value.groups?.size)
+            assertEquals(requests, transport.requests)
+        } finally { store.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun explicitOnSurvivesGlobalOffAndArtistChangesUseTheirOwnChoice() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val transport = FakeTransport()
+        val preferences = FakePreferences(ArtistCatalogPreference(true, MBID, "Example Artist"))
+        preferences.setDefaultEnabled(false)
+        val model = ArtistCatalogViewModel(repository(preferences, transport, dispatcher))
+        val store = ViewModelStore().apply { put("catalog", model) }
+        try {
+            model.updateArtistContext(artist, albums)
+            advanceUntilIdle()
+            assertTrue(model.state.value.enabled)
+            assertEquals(true, model.state.value.enabledOverride)
+            val requests = transport.requests
+            model.updateArtistContext(artist.copy(id = 456L), albums)
+            advanceUntilIdle()
+            assertFalse(model.state.value.enabled)
+            assertNull(model.state.value.enabledOverride)
+            assertEquals(requests, transport.requests)
+            model.updateArtistContext(artist, albums)
+            advanceUntilIdle()
+            assertTrue(model.state.value.enabled)
+            assertEquals(MBID, model.state.value.artistMbid)
+        } finally { store.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun lateBindSuccessForPreviousArtistPreservesTheCurrentArtistAndItsProposal() = runTest {
+        assertLateBindIsIsolated(fail = false)
+    }
+
+    @Test fun enablingOrFollowingGlobalResumesAutomaticIdentitySearchAfterItsOwnSave() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        try {
+            listOf(false, true).forEach { followDefault ->
+                val preferences = FakePreferences(ArtistCatalogPreference(enabledOverride = false))
+                val model = ArtistCatalogViewModel(repository(preferences, FakeTransport(), dispatcher))
+                val store = ViewModelStore().apply { put("catalog", model) }
+                try {
+                    model.updateArtistContext(artist, albums)
+                    advanceUntilIdle()
+                    assertFalse(model.state.value.enabled)
+                    if (followDefault) model.followDefault() else model.setEnabled(true)
+                    advanceUntilIdle()
+                    assertTrue(model.state.value.enabled)
+                    assertFalse(model.state.value.saving)
+                    assertEquals(MBID, model.state.value.artistMbid)
+                    assertEquals(2, model.state.value.groups?.size)
+                } finally { store.clear() }
+            }
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun lateBindFailureForPreviousArtistDoesNotShowAnErrorOnTheCurrentArtist() = runTest {
+        assertLateBindIsIsolated(fail = true)
+    }
+
+    private suspend fun TestScope.assertLateBindIsIsolated(fail: Boolean) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val release = CompletableDeferred<Unit>()
+        val entered = CompletableDeferred<Unit>()
+        val preferences = FakePreferences().apply {
+            beforeBind = { id -> if (id == artist.id) {
+                entered.complete(Unit)
+                release.await()
+                if (fail) throw IOException("old artist binding failed")
+            } }
+        }
+        val model = ArtistCatalogViewModel(repository(preferences, FakeTransport(), dispatcher))
+        val store = ViewModelStore().apply { put("catalog", model) }
+        try {
+            model.updateArtistContext(artist, albums.take(1))
+            advanceUntilIdle()
+            model.bind(model.state.value.candidates.single())
+            runCurrent()
+            assertTrue(entered.isCompleted)
+            model.updateArtistContext(artist.copy(id = 456L), albums.take(1))
+            advanceUntilIdle()
+            val current = model.state.value
+            assertTrue(current.choosingArtist)
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(current, model.state.value)
+            assertEquals(if (fail) null else MBID, preferences.snapshot(artist.id).artistMbid)
+            // The old save must not clear the new artist's proposed identity. Its later
+            // second source album should bind automatically without another artist search.
+            model.updateArtistContext(artist.copy(id = 456L), albums)
+            advanceUntilIdle()
+            assertEquals(MBID, preferences.snapshot(456L).artistMbid)
+            assertEquals(456L, model.state.value.artistId)
+        } finally { release.complete(Unit); store.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun lateEnabledSaveForPreviousArtistDoesNotClearTheCurrentPendingSave() = runTest {
+        assertLateSettingIsIsolated(followDefault = false, fail = false)
+    }
+
+    @Test fun lateEnabledSaveFailureForPreviousArtistDoesNotClearTheCurrentPendingSave() = runTest {
+        assertLateSettingIsIsolated(followDefault = false, fail = true)
+    }
+
+    @Test fun lateFollowDefaultSaveForPreviousArtistDoesNotClearTheCurrentPendingSave() = runTest {
+        assertLateSettingIsIsolated(followDefault = true, fail = false)
+    }
+
+    @Test fun lateFollowDefaultFailureForPreviousArtistDoesNotClearTheCurrentPendingSave() = runTest {
+        assertLateSettingIsIsolated(followDefault = true, fail = true)
+    }
+
+    private suspend fun TestScope.assertLateSettingIsIsolated(followDefault: Boolean, fail: Boolean) {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val releaseOld = CompletableDeferred<Unit>()
+        val releaseCurrent = CompletableDeferred<Unit>()
+        val oldEntered = CompletableDeferred<Unit>()
+        val currentEntered = CompletableDeferred<Unit>()
+        val preferences = FakePreferences(ArtistCatalogPreference(enabledOverride = false)).apply {
+            val oldWrite: suspend (Long) -> Unit = { id -> if (id == artist.id) {
+                oldEntered.complete(Unit)
+                releaseOld.await()
+                if (fail) throw IOException("old artist setting failed")
+            } }
+            beforeEnabled = { id ->
+                if (id == 456L) { currentEntered.complete(Unit); releaseCurrent.await() }
+                else oldWrite(id)
+            }
+            beforeClearEnabled = oldWrite
+        }
+        val model = ArtistCatalogViewModel(repository(preferences, FakeTransport(), dispatcher))
+        val store = ViewModelStore().apply { put("catalog", model) }
+        try {
+            model.updateArtistContext(artist, albums.take(1))
+            advanceUntilIdle()
+            if (followDefault) model.followDefault() else model.setEnabled(true)
+            runCurrent()
+            assertTrue(oldEntered.isCompleted)
+            model.updateArtistContext(artist.copy(id = 456L), albums.take(1))
+            advanceUntilIdle()
+            model.setEnabled(false)
+            runCurrent()
+            assertTrue(currentEntered.isCompleted)
+            val current = model.state.value
+            assertTrue(current.saving)
+            releaseOld.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(current, model.state.value)
+            assertNull(model.state.value.error)
+            assertTrue(model.state.value.saving)
+            assertEquals(if (fail) false else if (followDefault) null else true, preferences.snapshot(artist.id).enabledOverride)
+            releaseCurrent.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(model.state.value.saving)
+            assertFalse(model.state.value.enabled)
+            assertEquals(false, preferences.snapshot(456L).enabledOverride)
+        } finally { releaseOld.complete(Unit); releaseCurrent.complete(Unit); store.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun returningToTheSameArtistStillIgnoresAFailureFromItsEarlierPageGeneration() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val release = CompletableDeferred<Unit>()
+        val preferences = FakePreferences().apply {
+            beforeBind = { release.await(); throw IOException("outdated page save failed") }
+        }
+        val model = ArtistCatalogViewModel(repository(preferences, FakeTransport(), dispatcher))
+        val store = ViewModelStore().apply { put("catalog", model) }
+        try {
+            model.updateArtistContext(artist, albums.take(1))
+            advanceUntilIdle()
+            model.bind(model.state.value.candidates.single())
+            runCurrent()
+            model.updateArtistContext(artist.copy(id = 456L), albums.take(1))
+            advanceUntilIdle()
+            model.updateArtistContext(artist, albums.take(1))
+            advanceUntilIdle()
+            val current = model.state.value
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(current, model.state.value)
+            assertNull(model.state.value.error)
+        } finally { release.complete(Unit); store.clear(); Dispatchers.resetMain() }
+    }
+
     private fun repository(preferences: FakePreferences, transport: FakeTransport,
         dispatcher: CoroutineDispatcher) = ArtistCatalogRepository(
         cacheDirectory = temporary.newFolder(), preferences = preferences, transport = transport,
@@ -144,14 +369,32 @@ class ArtistCatalogViewModelTest {
         }, ioDispatcher = dispatcher)
 
     private class FakePreferences(initial: ArtistCatalogPreference = ArtistCatalogPreference()) : ArtistCatalogPreferenceStorage {
-        private val values = mutableMapOf(123L to MutableStateFlow(initial))
-        private fun value(id: Long) = values.getOrPut(id) { MutableStateFlow(ArtistCatalogPreference()) }
-        override fun observe(artistId: Long) = value(artistId)
-        override suspend fun setEnabled(artistId: Long, enabled: Boolean) { value(artistId).value = value(artistId).value.copy(enabled = enabled) }
-        override suspend fun bind(artistId: Long, mbid: String, name: String?) {
-            value(artistId).value = value(artistId).value.copy(artistMbid = mbid, artistName = name)
+        private val values = MutableStateFlow(mapOf(123L to initial))
+        override val defaultEnabled = MutableStateFlow(true)
+        private fun value(id: Long) = values.value[id] ?: ArtistCatalogPreference()
+        fun snapshot(id: Long) = value(id)
+        var beforeEnabled: suspend (Long) -> Unit = {}
+        var beforeClearEnabled: suspend (Long) -> Unit = {}
+        var beforeBind: suspend (Long) -> Unit = {}
+        override fun observe(artistId: Long) = combine(values, defaultEnabled) { current, default ->
+            (current[artistId] ?: ArtistCatalogPreference()).copy(defaultEnabled = default)
         }
-        override suspend fun clearBinding(artistId: Long) { value(artistId).value = value(artistId).value.copy(artistMbid = null, artistName = null) }
+        override suspend fun setDefaultEnabled(enabled: Boolean) { defaultEnabled.value = enabled }
+        override suspend fun setEnabled(artistId: Long, enabled: Boolean) {
+            beforeEnabled(artistId)
+            values.value += artistId to value(artistId).copy(enabledOverride = enabled)
+        }
+        override suspend fun clearEnabledOverride(artistId: Long) {
+            beforeClearEnabled(artistId)
+            values.value += artistId to value(artistId).copy(enabledOverride = null)
+        }
+        override suspend fun bind(artistId: Long, mbid: String, name: String?) {
+            beforeBind(artistId)
+            values.value += artistId to value(artistId).copy(artistMbid = mbid, artistName = name)
+        }
+        override suspend fun clearBinding(artistId: Long) {
+            values.value += artistId to value(artistId).copy(artistMbid = null, artistName = null)
+        }
     }
 
     private class FakeTransport : ArtistCatalogTransport {

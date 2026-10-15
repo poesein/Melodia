@@ -63,11 +63,21 @@ object ArtistCatalogMatcher {
         albums.distinctBy { it.id }.forEach { album ->
             val title = normalizer.normalizeTitle(album.name)
             val exact = titleIndex[title].orEmpty().distinctBy { it.id }
-            val resolved = exact.ifEmpty { titleIndex[normalizer.baseTitle(album.name)].orEmpty().distinctBy { it.id } }
+            val base = titleIndex[normalizer.baseTitle(album.name)].orEmpty().distinctBy { it.id }
+            val primaryType = sourcePrimaryType(album.type)
+            // The source's explicit Album/Single/EP type can distinguish same-title groups.
+            // A unique exact catalog classification remains authoritative, even when the
+            // streaming service labels an EP or live recording as an album.
+            val named = exact.ifEmpty { base }
+            val resolved = if (named.size > 1 && primaryType != null) {
+                named.filter { catalogPrimaryType(it) == primaryType }.ifEmpty { named }
+            } else named
             when {
                 resolved.isEmpty() -> unmatched.add(album)
+                resolved.size > 1 && resolved.all { classify(it) == ArtistCatalogClassification.EXCLUDED } -> excluded.add(album)
                 resolved.size > 1 -> ambiguous.add(album)
                 classify(resolved.single()) == ArtistCatalogClassification.UNKNOWN -> unmatched.add(album)
+                primaryType != null && catalogPrimaryType(resolved.single()) != primaryType -> excluded.add(album)
                 classify(resolved.single()) == ArtistCatalogClassification.EXCLUDED -> excluded.add(album)
                 else -> {
                     val group = resolved.single()
@@ -95,9 +105,14 @@ object ArtistCatalogMatcher {
             duplicates.addAll(ordered.drop(1).map { it.album })
         }
         val matchedGroups = matches.mapTo(hashSetOf()) { it.group.id }
+        // Streaming catalog order often puts an old album's recent remaster first.
+        // Once editions are grouped, present the actual album chronology instead.
+        val chronologicalMatches = matches.sortedWith(compareByDescending<ArtistCatalogAlbumMatch> {
+            releaseDate(it.group.firstReleaseDate)?.toEpochDay() ?: Long.MIN_VALUE
+        }.thenBy { normalizer.normalizeTitle(it.group.title) }.thenBy { it.group.id })
         return ArtistCatalogSelection(
-            albums = matches.map { it.album },
-            matches = matches,
+            albums = chronologicalMatches.map { it.album },
+            matches = chronologicalMatches,
             unmatchedAlbums = unmatched,
             ambiguousAlbums = ambiguous,
             excludedAlbums = excluded,
@@ -106,11 +121,27 @@ object ArtistCatalogMatcher {
         )
     }
 
+    private fun sourcePrimaryType(value: String?): String? = when (value?.trim()?.lowercase(Locale.ROOT)) {
+        "专辑", "album" -> "album"
+        "single", "单曲" -> "single"
+        "ep" -> "ep"
+        else -> null
+    }
+
+    private fun catalogPrimaryType(group: ArtistCatalogReleaseGroup): String? =
+        group.primaryType?.trim()?.lowercase(Locale.ROOT)
+
+    private fun releaseDate(value: String?): LocalDate? = value?.takeIf(String::isNotBlank)?.let {
+        runCatching {
+            val parts = it.split('-')
+            LocalDate.of(parts[0].toInt(), parts.getOrNull(1)?.toInt() ?: 1, parts.getOrNull(2)?.toInt() ?: 1)
+        }.getOrNull()
+    }
+
     private fun releaseDateDistance(publishTime: Long, firstReleaseDate: String?): Long {
         if (publishTime <= 0 || firstReleaseDate.isNullOrBlank()) return Long.MAX_VALUE
         return runCatching {
-            val parts = firstReleaseDate.split('-')
-            val original = LocalDate.of(parts[0].toInt(), parts.getOrNull(1)?.toInt() ?: 1, parts.getOrNull(2)?.toInt() ?: 1)
+            val original = releaseDate(firstReleaseDate) ?: return Long.MAX_VALUE
             val published = Instant.ofEpochMilli(publishTime).atZone(ZoneOffset.UTC).toLocalDate()
             abs(published.toEpochDay() - original.toEpochDay())
         }.getOrDefault(Long.MAX_VALUE)
