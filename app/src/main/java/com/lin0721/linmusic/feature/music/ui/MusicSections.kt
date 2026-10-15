@@ -52,7 +52,7 @@ fun MusicSectionTitle(title: String, trailing: String? = null, onSearchClick: ((
             .fillMaxWidth()
             .padding(start = MusicEdgePadding, end = MusicEdgePadding, top = 19.dp, bottom = 11.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = if (onSearchClick == null) Alignment.Bottom else Alignment.CenterVertically
     ) {
         Text(
             text = title,

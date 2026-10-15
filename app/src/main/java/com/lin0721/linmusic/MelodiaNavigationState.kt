@@ -118,7 +118,8 @@ class MelodiaNavigationState(
     initialMusicStack: List<Screen> = listOf(Screen.Music),
     initialMusicIds: List<Long> = emptyList(),
     initialShowMusicNewWorks: Boolean = false,
-    initialSearchReturnTab: Screen? = null
+    initialSearchReturnTab: Screen? = null,
+    initialShowHomeMusicNewWorks: Boolean = false
 ) {
 
     private var nextEntryId = initialNextEntryId
@@ -163,7 +164,7 @@ class MelodiaNavigationState(
         defaultRootTab = screen
     }
 
-    var activeTab by mutableStateOf(if (initialActiveTab == Screen.Home && initialHomeTab == TAB_MUSIC) Screen.Music else initialActiveTab)
+    var activeTab by mutableStateOf(initialActiveTab)
         private set
 
     private fun isTopLevelTab(screen: Screen): Boolean = when (screen) {
@@ -198,29 +199,32 @@ class MelodiaNavigationState(
     // 是否还有可回退的页面层级（包括二级页面、非首选根 tab、主页非「全部」分类或展开的最新药丸）
     val canGoBackToHomeAll: Boolean
         get() = canNavigateBack || canReturnFromSearch || activeTab != defaultRootTab ||
-            (activeTab == Screen.Home && homeTab != TAB_ALL) || (activeTab == Screen.Music && showMusicNewWorks)
+            (activeTab == Screen.Home && (homeTab != TAB_ALL || showHomeMusicNewWorks)) ||
+            (activeTab == Screen.Music && showMusicNewWorks)
 
     // 主页三个 tab 的选中项。存在导航状态里而非 HomeScreen 内部——
     // 页面切走时 HomeScreen 会离开 composition，记在里面的话从电台详情页退回来会跳回「全部」
-    var homeTab by mutableStateOf(if (initialHomeTab == TAB_MUSIC) TAB_ALL else initialHomeTab)
+    var homeTab by mutableStateOf(initialHomeTab)
         private set
 
-    // 音乐 tab「最新」二级药丸的选中态，同样存在导航状态里——
-    // 从新作 feed 点进专辑详情再返回时，HomeScreen 会被销毁重建，本地 remember 状态会丢
+    // 主页保留官方音乐/最新；独立音乐入口持有自己的选择，两个根页互不改变对方现场。
+    var showHomeMusicNewWorks by mutableStateOf(initialShowHomeMusicNewWorks)
+        private set
+
     var showMusicNewWorks by mutableStateOf(initialShowMusicNewWorks)
         private set
 
     var searchAutoFocus by mutableStateOf(false)
         private set
 
-    // 音乐页的搜索是一次往返；底栏主动进入搜索时不继承这个返回目标。
-    // 保留原音乐栈帧，页面的 saveable 滚动位置和“最新”选择才能一起恢复。
+    // 页面内搜索是一次往返；底栏主动进入搜索时不继承返回目标。
+    // 原栈帧保持不变，主页/独立音乐页的滚动位置和分类能一起恢复。
     private var searchReturnTab by mutableStateOf(
-        initialSearchReturnTab.takeIf { initialActiveTab == Screen.Search && it == Screen.Music }
+        initialSearchReturnTab.takeIf { initialActiveTab == Screen.Search && (it == Screen.Home || it == Screen.Music) }
     )
 
     val canReturnFromSearch: Boolean
-        get() = activeTab == Screen.Search && !canNavigateBack && searchReturnTab == Screen.Music
+        get() = activeTab == Screen.Search && !canNavigateBack && searchReturnTab != null
 
     // 记录从全屏播放器发起跳转时所在 tab 的栈深与歌曲 ID；当前栈深大于该深度时表示处于从播放器打开的二级页面中
     var playerNavTargetStackDepth by mutableIntStateOf(-1)
@@ -282,6 +286,7 @@ class MelodiaNavigationState(
             activeTab = defaultRootTab
             if (defaultRootTab == Screen.Home) {
                 homeTab = TAB_ALL
+                showHomeMusicNewWorks = false
             }
             return false
         }
@@ -290,6 +295,10 @@ class MelodiaNavigationState(
             return false
         }
         if (defaultRootTab == Screen.Home) {
+            if (showHomeMusicNewWorks) {
+                showHomeMusicNewWorks = false
+                return false
+            }
             if (homeTab != TAB_ALL) {
                 homeTab = TAB_ALL
                 return false
@@ -315,12 +324,13 @@ class MelodiaNavigationState(
     }
 
     fun selectHomeTab(index: Int) {
-        // An old homepage callback can still reach the new independent music root.
-        if (index == TAB_MUSIC) {
-            navigateTo(Screen.Music)
-        } else {
-            homeTab = index
-        }
+        // 与官方主页一致：再次点音乐回全部，点主分类收起其最新药丸。
+        homeTab = if (index == TAB_MUSIC && homeTab == TAB_MUSIC && !showHomeMusicNewWorks) TAB_ALL else index
+        showHomeMusicNewWorks = false
+    }
+
+    fun updateShowHomeMusicNewWorks(show: Boolean) {
+        showHomeMusicNewWorks = show
     }
 
     fun updateShowMusicNewWorks(show: Boolean) {
@@ -371,9 +381,10 @@ class MelodiaNavigationState(
         navigateTo(Screen.FollowList(uid, mode))
     }
 
-    // 从音乐偏好入口搜索，退出时回到原音乐现场；从底栏进入仍展示独立搜索页。
+    // 从页面内入口搜索，退出时回到原页面现场；从底栏进入仍展示独立搜索页。
     fun openSearch(autoFocus: Boolean) {
         val returnTab = when (activeTab) {
+            Screen.Home -> Screen.Home
             Screen.Music -> Screen.Music
             Screen.Search -> searchReturnTab
             else -> null
@@ -426,7 +437,8 @@ class MelodiaNavigationState(
         musicStack = musicStack.map { it.screen },
         musicIds = musicStack.map { it.id },
         showMusicNewWorks = showMusicNewWorks,
-        searchReturnTab = searchReturnTab
+        searchReturnTab = searchReturnTab,
+        showHomeMusicNewWorks = showHomeMusicNewWorks
     )
 }
 
@@ -454,7 +466,8 @@ internal data class NavigationSnapshot(
     val musicStack: List<Screen> = listOf(Screen.Music),
     val musicIds: List<Long> = emptyList(),
     val showMusicNewWorks: Boolean = false,
-    val searchReturnTab: Screen? = null
+    val searchReturnTab: Screen? = null,
+    val showHomeMusicNewWorks: Boolean = false
 )
 
 private fun tabIndex(tab: Screen): Int = when (tab) {
@@ -482,14 +495,13 @@ private fun tabFromIndex(index: Int): Screen = when (index) {
 private val navigationJson = Json { ignoreUnknownKeys = true }
 
 internal fun restoreNavigationSnapshot(snapshot: NavigationSnapshot): MelodiaNavigationState {
-    val legacyMusic = snapshot.homeTab == TAB_MUSIC
     return MelodiaNavigationState(
-        initialHomeStack = if (legacyMusic) listOf(Screen.Home) else snapshot.homeStack.ifEmpty { listOf(Screen.Home) },
+        initialHomeStack = snapshot.homeStack.ifEmpty { listOf(Screen.Home) },
         initialSearchStack = snapshot.searchStack.ifEmpty { listOf(Screen.Search) },
         initialLibraryStack = snapshot.libraryStack.ifEmpty { listOf(Screen.Library) },
         initialActiveTab = snapshot.activeTabScreen ?: tabFromIndex(snapshot.activeTabIndex),
         initialHomeTab = snapshot.homeTab,
-        initialHomeIds = if (legacyMusic) emptyList() else snapshot.homeIds,
+        initialHomeIds = snapshot.homeIds,
         initialSearchIds = snapshot.searchIds,
         initialLibraryIds = snapshot.libraryIds,
         initialNextEntryId = snapshot.nextEntryId,
@@ -501,10 +513,11 @@ internal fun restoreNavigationSnapshot(snapshot: NavigationSnapshot): MelodiaNav
         initialDownloadsIds = snapshot.downloadsIds,
         initialCloudIds = snapshot.cloudIds,
         initialMyProfileIds = snapshot.myProfileIds,
-        initialMusicStack = if (legacyMusic) listOf(Screen.Music) + snapshot.homeStack.drop(1) else snapshot.musicStack.ifEmpty { listOf(Screen.Music) },
-        initialMusicIds = if (legacyMusic) snapshot.homeIds else snapshot.musicIds,
+        initialMusicStack = snapshot.musicStack.ifEmpty { listOf(Screen.Music) },
+        initialMusicIds = snapshot.musicIds,
         initialShowMusicNewWorks = snapshot.showMusicNewWorks,
-        initialSearchReturnTab = snapshot.searchReturnTab
+        initialSearchReturnTab = snapshot.searchReturnTab,
+        initialShowHomeMusicNewWorks = snapshot.showHomeMusicNewWorks
     )
 }
 
