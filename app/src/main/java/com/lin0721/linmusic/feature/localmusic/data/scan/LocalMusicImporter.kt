@@ -8,6 +8,8 @@ import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import com.lin0721.linmusic.core.log.AppLogger
 import com.lin0721.linmusic.feature.localmusic.data.db.LocalTrackEntity
+import com.lin0721.linmusic.feature.localmusic.data.metadata.*
+import com.lin0721.linmusic.feature.localmusic.data.mergeRefreshedImportedTags
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -128,10 +130,14 @@ class LocalMusicImporter(private val context: Context) {
             runCatching { retriever.release() }
         }
 
-        val rawTitle = title?.trim()?.takeIf { it.isNotBlank() }
+        val system = LocalAudioMetadata(title, artist, album, albumArtist, year, trackNumber)
+        val wave = isWaveAudio(displayName, runCatching { context.contentResolver.getType(uri) }.getOrNull())
+        val metadata = mergeLocalAudioMetadata(system,
+            if (needsEmbeddedAudioTags(system, wave)) readLocalAudioTags(context, uri) else null, wave)
+        val rawTitle = metadata.title
             ?: displayName?.substringBeforeLast('.')?.trim()?.takeIf { it.isNotBlank() }
             ?: "未知曲目"
-        val (finalArtist, finalTitle) = resolveArtistAndTitle(artist?.trim().orEmpty(), rawTitle)
+        val (finalArtist, finalTitle) = resolveArtistAndTitle(metadata.artist.orEmpty(), rawTitle)
 
         val now = System.currentTimeMillis()
         return LocalTrackEntity(
@@ -140,23 +146,40 @@ class LocalMusicImporter(private val context: Context) {
             songId = null,
             title = finalTitle,
             artist = finalArtist,
-            album = album?.trim()?.takeIf { it.isNotBlank() },
+            album = metadata.album,
             durationMs = durationMs,
             sizeBytes = fileSize,
             path = null,
             dateAddedMs = now,
             dateModifiedMs = now,
             source = LocalTrackSource.IMPORTED.name,
-            year = year,
-            trackNumber = trackNumber,
-            albumArtist = albumArtist
+            year = metadata.year,
+            trackNumber = metadata.trackNumber,
+            albumArtist = metadata.albumArtist
         )
+    }
+
+    /** Refresh only tags positively read from an already granted imported WAV reference. */
+    internal fun refreshWaveTags(existing: LocalTrackEntity): LocalTrackEntity? {
+        if (existing.source != LocalTrackSource.IMPORTED.name) return null
+        val uri = Uri.parse(existing.uri)
+        var displayName: String? = existing.path?.substringAfterLast('/') ?: Uri.decode(uri.lastPathSegment)
+        runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (column >= 0 && !cursor.isNull(column)) displayName = cursor.getString(column)
+                }
+            }
+        }
+        val mimeType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        if (!isWaveAudio(displayName, mimeType)) return null
+        val tags = readLocalAudioTags(context, uri) ?: return null
+        return mergeRefreshedImportedTags(existing, tags).takeIf { it != existing }
     }
 }
 
 // 元数据形如 "3/12"，按 MediaStore 的规则编码为 碟号 * 1000 + 音轨号，便于统一排序
 internal fun encodeTrackNumber(track: String?, disc: String?): Int? {
-    val trackNo = track?.substringBefore('/')?.trim()?.toIntOrNull()?.takeIf { it in 1..999 } ?: return null
-    val discNo = disc?.substringBefore('/')?.trim()?.toIntOrNull()?.takeIf { it > 0 } ?: 0
-    return discNo * 1000 + trackNo
+    return localTrackNumberFromTags(track, disc)
 }

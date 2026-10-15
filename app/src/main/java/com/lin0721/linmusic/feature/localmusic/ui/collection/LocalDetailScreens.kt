@@ -53,7 +53,6 @@ import com.lin0721.linmusic.core.ui.theme.MelodiaPress
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.feature.localmusic.domain.LocalAlbum
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrack
-import com.lin0721.linmusic.feature.localmusic.domain.albumKey
 import com.lin0721.linmusic.feature.localmusic.domain.albumName
 import com.lin0721.linmusic.feature.localmusic.domain.displayTrackNumber
 import com.lin0721.linmusic.feature.localmusic.ui.LocalLibraryStateGate
@@ -92,7 +91,7 @@ fun LocalArtistScreen(
     LocalSelectionLifecycle(viewModel, selecting = success?.isSelectionMode == true)
     val artist = library.artist(name)
     val albums = remember(artist, library) {
-        artist?.tracks?.mapNotNull { library.album(it.albumKey) }?.filterNot { it.isUnknown }?.distinctBy { it.key }.orEmpty()
+        artist?.tracks?.mapNotNull(library::albumForTrack)?.filterNot { it.isUnknown }?.distinctBy { it.key }.orEmpty()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(BackgroundDark)) {

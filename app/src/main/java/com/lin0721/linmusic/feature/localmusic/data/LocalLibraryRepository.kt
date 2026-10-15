@@ -93,8 +93,18 @@ class LocalLibraryRepository(
     suspend fun sync() = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             migrateLegacyImports()
-            if (!hasPermission()) return@withLock
-            val rawScanned = scanner.scan() ?: return@withLock
+            val existing = dao.getAll()
+            val refreshedImports = existing.asSequence().filter { it.source == LocalTrackSource.IMPORTED.name }
+                .mapNotNull(importer::refreshWaveTags).toList()
+            if (!hasPermission()) {
+                if (refreshedImports.isNotEmpty()) dao.upsert(refreshedImports)
+                return@withLock
+            }
+            val rawScanned = scanner.scan()
+            if (rawScanned == null) {
+                if (refreshedImports.isNotEmpty()) dao.upsert(refreshedImports)
+                return@withLock
+            }
 
             val downloadRecords = downloadPreferences.records.first()
                 .filter { isDefaultDownloadDirectoryUri(it.mediaStoreUri) }
@@ -111,11 +121,13 @@ class LocalLibraryRepository(
             }
 
             val diff = computeLocalLibrarySyncDiff(
-                existing = dao.getAll(),
+                existing = existing,
                 scanned = scanned,
                 isImportedAlive = { isReadable(Uri.parse(it.uri)) }
             )
-            dao.applySync(diff.upserts, diff.deleteUris)
+            val scannedUris = scanned.mapTo(HashSet()) { it.uri }
+            val importedUpdates = refreshedImports.filter { it.uri !in scannedUris && it.uri !in diff.deleteUris }
+            dao.applySync(diff.upserts + importedUpdates, diff.deleteUris)
         }
     }
 

@@ -8,6 +8,7 @@ import android.system.Os
 import android.system.OsConstants
 import com.lin0721.linmusic.feature.localmusic.data.localAudioIdentity
 import com.lin0721.linmusic.feature.localmusic.data.scan.resolveArtistAndTitle
+import com.lin0721.linmusic.feature.localmusic.data.metadata.*
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrack
 import kotlinx.coroutines.CancellationException
 
@@ -40,11 +41,18 @@ internal fun inspectAssociationFile(context: Context, uriString: String, fallbac
                 metadata.setDataSource(asset.parcelFileDescriptor.fileDescriptor, asset.startOffset, size)
                 val duration = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0L }
                     ?: return@use null
-                val rawTitle = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.trim()?.takeIf { it.isNotBlank() }
+                val system = LocalAudioMetadata(
+                    title = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE),
+                    artist = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST),
+                    album = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM))
+                val wave = isWaveAudio(fileName, runCatching { context.contentResolver.getType(uri) }.getOrNull())
+                val tags = mergeLocalAudioMetadata(system,
+                    if (needsEmbeddedAudioTags(system, wave, extendedFields = false)) readLocalAudioTags(context, uri) else null, wave)
+                val rawTitle = tags.title
                     ?: fileName?.substringBeforeLast('.')?.trim().orEmpty()
-                val rawArtist = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.trim().orEmpty()
+                val rawArtist = tags.artist.orEmpty()
                 val (artist, title) = resolveArtistAndTitle(rawArtist, rawTitle)
-                val album = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.trim()?.takeIf { it.isNotBlank() }
+                val album = tags.album
                 val identity = localAudioIdentity(context, uriString) ?: return@use null
                 if (regular) {
                     // A provider/path replacement between the descriptor and identity reads is unresolved.

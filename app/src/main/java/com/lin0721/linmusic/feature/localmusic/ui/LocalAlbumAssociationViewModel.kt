@@ -371,6 +371,21 @@ class LocalAlbumAssociationViewModel(
         buildLocalLibraryIndex(library.tracks.first()).album(localAlbumKey)?.let(::localAlbumMatchFingerprint)
     }
 
+    private suspend fun liveAlbumTrack(localAlbumKey: String, track: LocalTrack): LocalTrack? =
+        withContext(Dispatchers.Default) {
+            val tracks = library.tracks.first()
+            val live = tracks.firstOrNull { it.uri == track.uri } ?: return@withContext null
+            // Only this folder can affect a contextual album key; avoid sorting the whole library
+            // into artists/cards again for every song in a large album's guarded write loop.
+            val folder = live.folderPath
+            val peers = if (folder == null) listOf(live) else tracks.filter { it.folderPath == folder }
+            val index = peers.indexOfFirst { it.uri == live.uri }
+            val identities = resolveLocalAlbumGroups(peers.map {
+                LocalAlbumGroupMetadata(it.album, it.artist, it.albumArtist, it.folderPath)
+            })
+            live.takeIf { identities[index].key == localAlbumKey }
+        }
+
     private suspend fun saveScope(current: LocalAlbumAssociationState): LocalAlbumAssociation {
         val fingerprint = localAlbumMatchFingerprint(current.local)
         check(liveFingerprint(current.local.key) == fingerprint) { "本地专辑内容已变化，请重新打开核对" }
@@ -417,7 +432,7 @@ class LocalAlbumAssociationViewModel(
                         continue
                     }
                     mutableState.update { it?.copy(savingUri = row.local.uri.toString(), message = "正在关联：${row.local.title}") }
-                    val live = library.tracks.first().firstOrNull { it.uri == row.local.uri && it.albumKey == current.local.key }
+                    val live = liveAlbumTrack(current.local.key, row.local)
                     if (live == null) {
                         saveFailed = true
                         updateRow(row.local, AlbumSongMatchStatus.ERROR, "本地曲目已移出这张专辑，请重新打开核对")
@@ -474,7 +489,7 @@ class LocalAlbumAssociationViewModel(
         viewModelScope.launch {
             try {
                 batch.pauseAndAwaitForAlbumMatching()
-                val live = library.tracks.first().firstOrNull { it.uri == local.uri && it.albumKey == current.local.key }
+                val live = liveAlbumTrack(current.local.key, local)
                     ?: error("本地曲目已移出此专辑")
                 val binding = saveScope(current)
                 when (val result = commitManualAssociation({ preferred.linkLocalTrack(live, target) },

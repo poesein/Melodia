@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.MediaStore
 import com.lin0721.linmusic.core.log.AppLogger
 import com.lin0721.linmusic.feature.localmusic.data.db.LocalTrackEntity
+import com.lin0721.linmusic.feature.localmusic.data.metadata.*
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
 
 private const val TAG = "MediaStoreScanner"
@@ -24,6 +25,8 @@ class MediaStoreScanner(private val context: Context) {
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.SIZE,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.MIME_TYPE,
             MediaStore.Audio.Media.DATA,
             MediaStore.Audio.Media.DATE_ADDED,
             MediaStore.Audio.Media.DATE_MODIFIED,
@@ -47,7 +50,9 @@ class MediaStoreScanner(private val context: Context) {
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
-                val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                val displayNameCol = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME)
+                val mimeTypeCol = cursor.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE)
                 val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 val dateModifiedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
                 val albumArtistCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -59,26 +64,39 @@ class MediaStoreScanner(private val context: Context) {
                 val trackCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
+                    val uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                    val path = dataCol.takeIf { it >= 0 }?.let { cursor.getString(it) }
+                    val displayName = displayNameCol.takeIf { it >= 0 }?.let { cursor.getString(it) }
+                        ?: path?.substringAfterLast('/')
+                    val mimeType = mimeTypeCol.takeIf { it >= 0 }?.let { cursor.getString(it) }
+                    val system = LocalAudioMetadata(cursor.getString(titleCol), cursor.getString(artistCol),
+                        cursor.getString(albumCol),
+                        albumArtistCol.takeIf { it >= 0 }?.let { cursor.getString(it) },
+                        cursor.getIntOrNull(yearCol)?.takeIf { it > 0 },
+                        cursor.getIntOrNull(trackCol)?.takeIf { it > 0 })
+                    val wave = isWaveAudio(displayName, mimeType)
+                    val metadata = mergeLocalAudioMetadata(system,
+                        if (needsEmbeddedAudioTags(system, wave)) readLocalAudioTags(context, uri) else null, wave)
                     val (artist, title) = resolveArtistAndTitle(
-                        rawArtist = cursor.getString(artistCol).orEmpty(),
-                        rawTitle = cursor.getString(titleCol) ?: UNKNOWN_TITLE
+                        rawArtist = metadata.artist.orEmpty(),
+                        rawTitle = metadata.title ?: displayName?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: UNKNOWN_TITLE
                     )
                     results += LocalTrackEntity(
-                        uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString(),
+                        uri = uri.toString(),
                         mediaStoreId = id,
                         songId = null,
                         title = title,
                         artist = artist,
-                        album = cursor.getString(albumCol),
+                        album = metadata.album,
                         durationMs = cursor.getLong(durationCol),
                         sizeBytes = cursor.getLong(sizeCol),
-                        path = cursor.getString(dataCol),
+                        path = path,
                         dateAddedMs = cursor.getLong(dateAddedCol) * 1000,
                         dateModifiedMs = cursor.getLong(dateModifiedCol) * 1000,
                         source = LocalTrackSource.EXTERNAL.name,
-                        albumArtist = albumArtistCol.takeIf { it >= 0 }?.let { cursor.getString(it) }?.trim()?.takeIf { it.isNotEmpty() },
-                        year = cursor.getIntOrNull(yearCol)?.takeIf { it > 0 },
-                        trackNumber = cursor.getIntOrNull(trackCol)?.takeIf { it > 0 }
+                        albumArtist = metadata.albumArtist,
+                        year = metadata.year,
+                        trackNumber = metadata.trackNumber
                     )
                 }
             }
