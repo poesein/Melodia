@@ -91,6 +91,177 @@ class AlbumScopedMatchPolicyTest {
         assertSame(liveRemaster, AlbumScopedMatchPolicy.evaluate(sameLive, listOf(liveRemaster)).match)
     }
 
+    @Test fun oppositeScriptTranslationSuffixesCanUseTheOriginalTitleInEitherDirection() {
+        listOf("行动 (Move)" to "行动", "蒙在鼓里 (Be Kept in the Dark)" to "蒙在鼓里",
+            "这就是你 (This Is You)" to "这就是你", "Pacific (太平洋)" to "Pacific").forEach { (bilingual, plain) ->
+            val candidate = local.copy(title = bilingual, fileName = "$bilingual.flac")
+            assertEquals(bilingual, AlbumScopedMatchStatus.MATCH,
+                AlbumScopedMatchPolicy.evaluate(candidate, listOf(online.copy(name = plain))).status)
+            assertEquals(bilingual, AlbumScopedMatchStatus.MATCH,
+                AlbumScopedMatchPolicy.evaluate(candidate.copy(title = plain, fileName = "$plain.flac"), listOf(online.copy(name = bilingual))).status)
+        }
+    }
+
+    @Test fun translationCleanupDoesNotBypassDurationOrRecordingChecks() {
+        val candidate = local.copy(title = "乌鸦 (Crow)", fileName = "乌鸦 (Crow).flac", durationMs = 425_353L)
+        val catalog = online.copy(name = "乌鸦", dt = 317_884L)
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(candidate, listOf(catalog)).status)
+        val live = local.copy(title = "行动 (Move) (Live)", fileName = "行动 (Move) (Live).flac")
+        assertTrue(AlbumScopedMatchPolicy.evaluate(live, listOf(online.copy(name = "行动"))).status != AlbumScopedMatchStatus.MATCH)
+    }
+
+    @Test fun sameScriptSubtitlesRemainPartOfTheSongIdentity() {
+        listOf("Exit Music (For a Film)" to "Exit Music", "Ultra Violet (Light My Way)" to "Ultra Violet", "五味瓶（续篇）" to "五味瓶").forEach { (full, short) ->
+            val candidate = local.copy(title = full, fileName = "$full.flac")
+            assertTrue(full, AlbumScopedMatchPolicy.evaluate(candidate, listOf(online.copy(name = short))).status != AlbumScopedMatchStatus.MATCH)
+        }
+    }
+
+    @Test fun crossScriptVersionAnnotationsAndNumbersCannotBeTreatedAsTranslations() {
+        listOf("Live", "Remix", "Instrumental", "Clean", "Explicit", "Part II", "PartII", "Version 2", "II").forEach { annotation ->
+            val full = "五味瓶 ($annotation)"
+            assertTrue(annotation, AlbumScopedMatchPolicy.evaluate(local.copy(title = full, fileName = "$full.flac"), listOf(online)).status != AlbumScopedMatchStatus.MATCH)
+        }
+        listOf("现场", "混音", "伴奏", "重录版", "版本二", "第二部").forEach { annotation ->
+            val full = "Pacific ($annotation)"
+            assertTrue(annotation, AlbumScopedMatchPolicy.evaluate(local.copy(title = full, fileName = "$full.flac"), listOf(online.copy(name = "Pacific"))).status != AlbumScopedMatchStatus.MATCH)
+        }
+    }
+
+    @Test fun differentOnlineIdsForTheSameTranslationAliasStillNeedReview() {
+        val candidate = local.copy(title = "行动 (Move)", fileName = "行动 (Move).flac")
+        val first = online.copy(name = "行动")
+        val second = online.copy(id = 101L, name = "行动 (Move)")
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(candidate, listOf(first, second)).status)
+    }
+
+    @Test fun featuredCreditsCanBeOmittedOnlyWhenExplicitlyVerifiedByOnlineArtists() {
+        val candidate = local.copy(title = "GIRL feat.呂布 (女孩)", fileName = "GIRL feat.呂布 (女孩).flac")
+        val credited = online.copy(name = "GIRL", ar = listOf(Artist(name = "Suchmos"), Artist(name = "呂布")))
+        assertSame(credited, AlbumScopedMatchPolicy.evaluate(candidate, listOf(credited)).match)
+        assertTrue(AlbumScopedMatchPolicy.evaluate(candidate, listOf(credited.copy(ar = listOf(Artist(name = "Suchmos"))))).status != AlbumScopedMatchStatus.MATCH)
+    }
+
+    @Test fun verifiedFeaturedCreditAndTranslationCanBeInEitherSuffixOrder() {
+        val credited = online.copy(name = "GIRL", ar = listOf(Artist(name = "Suchmos"), Artist(name = "呂布")))
+        listOf("GIRL (女孩) feat.呂布", "GIRL (feat.呂布)", "GIRL ft. 呂布").forEach { title ->
+            assertSame(title, credited, AlbumScopedMatchPolicy.evaluate(local.copy(title = title, fileName = "$title.flac"), listOf(credited)).match)
+        }
+        val plain = local.copy(title = "GIRL", fileName = "GIRL.flac")
+        assertEquals(AlbumScopedMatchStatus.MATCH, AlbumScopedMatchPolicy.evaluate(plain, listOf(credited.copy(name = "GIRL (feat.呂布)"))).status)
+    }
+
+    @Test fun everyFeaturedCreditMustBePresentInTheActualOnlineArtistList() {
+        val candidate = local.copy(title = "Song feat. B & C", fileName = "Song feat. B & C.flac")
+        val credited = online.copy(name = "Song", ar = listOf(Artist(name = "A"), Artist(name = "B")))
+        assertTrue(AlbumScopedMatchPolicy.evaluate(candidate, listOf(credited)).status != AlbumScopedMatchStatus.MATCH)
+        assertEquals(AlbumScopedMatchStatus.MATCH,
+            AlbumScopedMatchPolicy.evaluate(candidate, listOf(credited.copy(ar = credited.ar + Artist(name = "C")))).status)
+    }
+
+    @Test fun genericLiveCanUseOneUniqueSpecificLiveWithinTwoSeconds() {
+        val candidate = local.copy(title = "五味瓶 (Live)", fileName = "五味瓶 (Live).flac")
+        val live = online.copy(name = "五味瓶 (Live at Madison Square Garden, 1987)", dt = candidate.durationMs + 2_000L)
+        assertSame(live, AlbumScopedMatchPolicy.evaluate(candidate, listOf(live)).match)
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(candidate, listOf(live.copy(dt = candidate.durationMs + 2_001L))).status)
+        val chinese = candidate.copy(title = "五味瓶（现场）", fileName = "五味瓶（现场）.flac")
+        assertSame(live, AlbumScopedMatchPolicy.evaluate(chinese, listOf(live)).match)
+    }
+
+    @Test fun multipleNearbyLiveVenuesNeedReviewEvenWhenOneGenericTitleMatchesExactly() {
+        val candidate = local.copy(title = "五味瓶 (Live)", fileName = "五味瓶 (Live).flac")
+        val generic = online.copy(name = "五味瓶 (Live)")
+        val specific = online.copy(id = 101L, name = "五味瓶 (Live at Tokyo)")
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(candidate, listOf(generic, specific)).status)
+        assertEquals(AlbumScopedMatchStatus.REVIEW,
+            AlbumScopedMatchPolicy.evaluate(candidate, listOf(specific, generic.copy(name = "五味瓶 Live"))).status)
+        val paris = specific.copy(id = 102L, name = "五味瓶 (Live at Paris)")
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(candidate, listOf(specific, paris)).status)
+    }
+
+    @Test fun aLiveCandidateWithUnknownDurationPreventsGenericLiveConfirmation() {
+        val candidate = local.copy(title = "五味瓶 (Live)", fileName = "五味瓶 (Live).flac")
+        val generic = online.copy(name = "五味瓶 (Live)")
+        val unknown = online.copy(id = 101L, name = "五味瓶 (Live at Unknown Venue)", dt = 0L)
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(candidate, listOf(generic, unknown)).status)
+        assertEquals(AlbumScopedMatchStatus.REVIEW,
+            AlbumScopedMatchPolicy.evaluate(candidate.copy(durationMs = 0L), listOf(generic.copy(name = "五味瓶 (Live at Tokyo)"))).status)
+    }
+
+    @Test fun aFartherLiveVenueDoesNotOutvoteOneUniqueNearLiveRecording() {
+        val candidate = local.copy(title = "五味瓶 (Live)", fileName = "五味瓶 (Live).flac")
+        val near = online.copy(name = "五味瓶 (Live at Tokyo)")
+        val far = online.copy(id = 101L, name = "五味瓶 (Live at Paris)", dt = candidate.durationMs + 20_000L)
+        assertSame(near, AlbumScopedMatchPolicy.evaluate(candidate, listOf(far, near)).match)
+    }
+
+    @Test fun explicitLocalVenuesYearsAndUnknownVenueLabelsDoNotBecomeGenericLive() {
+        listOf("Live at Paris", "Live 1987", "Live at Unknown Venue").forEach { qualifier ->
+            val candidate = local.copy(title = "五味瓶 ($qualifier)", fileName = "五味瓶 ($qualifier).flac")
+            val tokyo = online.copy(name = "五味瓶 (Live at Tokyo)")
+            assertEquals(qualifier, AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(candidate, listOf(tokyo)).status)
+        }
+    }
+
+    @Test fun genericLiveNeverMatchesStudioOrAnAcousticRemixRecording() {
+        val live = local.copy(title = "五味瓶 (Live)", fileName = "五味瓶 (Live).flac")
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(live, listOf(online)).status)
+        listOf("Live Remix", "Live Acoustic", "Live Instrumental", "Live Clean", "Live Explicit", "Live Radio Edit", "Live Extended").forEach { qualifier ->
+            assertEquals(qualifier, AlbumScopedMatchStatus.REVIEW,
+                AlbumScopedMatchPolicy.evaluate(live, listOf(online.copy(name = "五味瓶 ($qualifier)"))).status)
+        }
+        assertEquals(AlbumScopedMatchStatus.REVIEW,
+            AlbumScopedMatchPolicy.evaluate(local, listOf(online.copy(name = "五味瓶 (Live at Tokyo)"))).status)
+    }
+
+    @Test fun genericLiveQualifierGuardDoesNotTreatWordsInTheSongBaseAsVersions() {
+        val live = local.copy(title = "Clean Part (Live)", fileName = "Clean Part (Live).flac")
+        val venue = online.copy(name = "Clean Part (Live at Radio City, 2017)")
+        assertSame(venue, AlbumScopedMatchPolicy.evaluate(live, listOf(venue)).match)
+    }
+
+    @Test fun isolatedExactGenericLiveRetainsExistingFivePercentTolerance() {
+        val live = local.copy(title = "五味瓶 (Live)", fileName = "五味瓶 (Live).flac", durationMs = 180_000L)
+        val exact = online.copy(name = "五味瓶 (Live)", dt = 185_000L)
+        assertSame(exact, AlbumScopedMatchPolicy.evaluate(live, listOf(exact)).match)
+        val specific = online.copy(id = 101L, name = "五味瓶 (Live at Tokyo)", dt = 220_000L)
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(live, listOf(exact, specific)).status)
+    }
+
+    @Test fun genericLiveStillHonorsHiddenFilenameVenueAndConflictingOnlineCopies() {
+        val live = local.copy(title = "五味瓶 (Live)", fileName = "五味瓶 (Live at Paris).flac")
+        val tokyo = online.copy(name = "五味瓶 (Live at Tokyo)")
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(live, listOf(tokyo)).status)
+        val generic = live.copy(fileName = "五味瓶 (Live).flac")
+        assertEquals(AlbumScopedMatchStatus.REVIEW,
+            AlbumScopedMatchPolicy.evaluate(generic, listOf(tokyo, tokyo.copy(dt = 0L))).status)
+    }
+
+    @Test fun windowsCopyNumbersDoNotMakeFullyTaggedRemixesAppearToHaveHiddenVersions() {
+        val remix = local.copy(title = "五味瓶 (Jacknife Lee Remix)")
+        val catalog = online.copy(name = "五味瓶 (Jacknife Lee Remix)")
+        listOf("五味瓶 (Jacknife Lee Remix)(1).flac", "Artist - 五味瓶 (Jacknife Lee Remix) (2).flac", "五味瓶 (Jacknife Lee Remix)(999).wav").forEach { file ->
+            assertSame(file, catalog, AlbumScopedMatchPolicy.evaluate(remix.copy(fileName = file), listOf(catalog)).match)
+        }
+    }
+
+    @Test fun copyNumberCleanupDoesNotRemoveYearsPartsOrTheActualRecordingVersion() {
+        val remix = local.copy(title = "五味瓶 (Remix)")
+        listOf("五味瓶 (Other Remix)(1).flac", "五味瓶 (Remix)(2024).flac", "五味瓶 (Remix)(Part 1).flac").forEach { file ->
+            assertEquals(file, AlbumScopedMatchStatus.REVIEW,
+                AlbumScopedMatchPolicy.evaluate(remix.copy(fileName = file), listOf(online.copy(name = "五味瓶 (Remix)"))).status)
+        }
+        val hidden = local.copy(fileName = "五味瓶 (Live)(1).flac")
+        assertEquals(AlbumScopedMatchStatus.REVIEW, AlbumScopedMatchPolicy.evaluate(hidden, listOf(online)).status)
+    }
+
+    @Test fun numberedParenthesesInTheTagRemainPartOfTheActualSongTitle() {
+        val numbered = local.copy(title = "五味瓶 (Live)(1)", fileName = "五味瓶 (Live)(1).flac")
+        assertTrue(AlbumScopedMatchPolicy.evaluate(numbered, listOf(online.copy(name = "五味瓶 (Live at Tokyo)"))).status != AlbumScopedMatchStatus.MATCH)
+        assertEquals(online.copy(name = numbered.title).name,
+            AlbumScopedMatchPolicy.evaluate(numbered, listOf(online.copy(name = numbered.title))).match?.name)
+    }
+
     @Test fun numericTitlesAreNotTreatedAsTrackNumbers() {
         listOf("7 rings", "1989", "3.14", "01", "10-Feet").forEach { name ->
             val candidate = local.copy(title = name, fileName = "$name.flac")

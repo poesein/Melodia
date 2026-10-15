@@ -10,6 +10,10 @@ import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepositor
 import com.lin0721.linmusic.feature.localmusic.data.LocalAlbumAssociationStore
 import com.lin0721.linmusic.feature.localmusic.data.batch.LocalMatchCoverRepository
 import com.lin0721.linmusic.feature.localmusic.data.batch.BatchLocalMatchRepository
+import com.lin0721.linmusic.feature.localmusic.data.batch.BatchAlbumMatchStore
+import com.lin0721.linmusic.feature.localmusic.data.batch.BatchAlbumDetailApi
+import com.lin0721.linmusic.feature.localmusic.data.batch.BatchAlbumOnlineRepository
+import retrofit2.Retrofit
 import com.lin0721.linmusic.feature.localmusic.data.LocalPlaylistRepository
 import com.lin0721.linmusic.feature.localmusic.data.db.LocalMusicDatabase
 import com.lin0721.linmusic.feature.localmusic.data.lyrics.LocalLyricsReader
@@ -48,6 +52,9 @@ val localMusicModule = module {
     single { LocalTagEditor(androidContext()) }
     single { PreferredLocalAudioRepository(androidContext(), library = get()) }
     single { LocalAlbumAssociationStore(androidContext()) }
+    single { BatchAlbumMatchStore(androidContext()) }
+    single<BatchAlbumDetailApi> { get<Retrofit>().create(BatchAlbumDetailApi::class.java) }
+    single { BatchAlbumOnlineRepository(search = get(), api = get(), contentFilter = get()) }
     single { LocalMatchCoverRepository(playerRepository = get()) }
     single { BatchLocalMatchRepository(androidContext(), preferredAudio = get(), search = get(), covers = get()) }
     single<LocalMusicApi> { LocalMusicApiImpl(coverArtCache = get(), lyricsReader = get(), preferredAudio = get()) }

@@ -16,6 +16,7 @@ import com.lin0721.linmusic.feature.listendata.ui.ListenDataViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.OnlineLocalAudioPickerViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.LocalAlbumAssociationViewModel
+import com.lin0721.linmusic.feature.localmusic.ui.BatchAlbumMatchViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.settings.LocalMusicSettingsViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.tageditor.LocalTagEditorViewModel
 import com.lin0721.linmusic.feature.newworks.ui.NewWorksViewModel
@@ -81,6 +82,7 @@ val viewModelModule = module {
     viewModelOf(::LocalMusicViewModel)
     viewModelOf(::OnlineLocalAudioPickerViewModel)
     viewModelOf(::LocalAlbumAssociationViewModel)
+    viewModelOf(::BatchAlbumMatchViewModel)
     viewModelOf(::LocalMusicSettingsViewModel)
     viewModelOf(::LocalTagEditorViewModel)
     viewModelOf(::NewWorksViewModel)

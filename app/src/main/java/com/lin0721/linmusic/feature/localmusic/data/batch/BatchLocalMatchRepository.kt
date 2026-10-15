@@ -127,20 +127,40 @@ class BatchLocalMatchRepository(
 
     /** Review opens immediately; cancel background work without a full-library refresh on its way out. */
     fun pauseForReview() {
-        scope.launch {
-            val toCancel = commandMutex.withLock {
-                if (pausing || runningJob?.isActive != true) return@launch
-                pausing = true
-                runningJob!!
+        scope.launch { pauseAndAwaitForAlbumMatching() }
+    }
+
+    /** Album matching waits until the previous song pass and its last reference edit are reconciled. */
+    suspend fun pauseAndAwaitForAlbumMatching() {
+        while (true) {
+            val (ownsPause, toCancel) = commandMutex.withLock {
+                when {
+                    pausing -> false to null
+                    runningJob?.isActive != true && !state.value.isRunning && activeRow == null -> return
+                    else -> {
+                        pausing = true
+                        true to runningJob
+                    }
+                }
+            }
+            if (!ownsPause) {
+                // Another pause owns cancel/join/reconciliation. Recheck under the command mutex
+                // after it releases pausing instead of returning while that work is still running.
+                delay(20L)
+                continue
             }
             var issue: String? = null
             try {
-                toCancel.cancelAndJoin()
-                // A preference write can finish just before cancellation reaches the report commit.
-                // Reconcile that one actual reference without delaying review behind the whole library.
-                activeRow?.let { row ->
-                    preferredAudio.confirmedForLocalTrack(row.local)?.let { track ->
-                        recordManualAssociation(row.local, track)
+                // Once this caller owns the pause, cancellation must not publish a stopped state
+                // before the previous job finishes unwinding or loses its final saved reference.
+                withContext(NonCancellable) {
+                    toCancel?.cancelAndJoin()
+                    // A preference write can finish just before cancellation reaches the report commit.
+                    // Reconcile that one actual reference without delaying review behind the whole library.
+                    activeRow?.let { row ->
+                        preferredAudio.confirmedForLocalTrack(row.local)?.let { track ->
+                            recordManualAssociation(row.local, track)
+                        }
                     }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -159,6 +179,7 @@ class BatchLocalMatchRepository(
                     }
                 }
             }
+            return
         }
     }
 

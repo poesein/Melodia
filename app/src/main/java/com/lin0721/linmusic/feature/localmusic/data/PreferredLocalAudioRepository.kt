@@ -238,6 +238,9 @@ class PreferredLocalAudioRepository(
     }
 
     /** One preference snapshot for album previews; physical aliases remain a write-time safety check. */
+    val manualLinkReferences: Flow<Map<Long, String>> = context.preferredLocalAudioDataStore.data
+        .map(::storedLinks).distinctUntilChanged()
+
     suspend fun manualLinksSnapshot(): Map<Long, String> = withContext(Dispatchers.IO) {
         storedLinks(context.preferredLocalAudioDataStore.data.first())
     }

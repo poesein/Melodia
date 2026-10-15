@@ -46,7 +46,8 @@ class LocalAlbumAssociationViewModel(
 
     private fun busy() = mutableState.value?.let { it.running || it.savingUri != null } == true
 
-    fun open(local: LocalAlbum, online: Album? = null, tracks: List<Track> = emptyList(), fromHub: Boolean = false) {
+    fun open(local: LocalAlbum, online: Album? = null, tracks: List<Track> = emptyList(), fromHub: Boolean = false,
+             candidates: List<Album> = emptyList()) {
         if (busy()) return
         if (!fromHub) returnHub = null
         hubObserver?.cancel()
@@ -57,7 +58,7 @@ class LocalAlbumAssociationViewModel(
         val token = ++generation
         val artist = local.artist.takeIf(PreferredLocalAudioMatcher::hasKnownArtist).orEmpty()
         mutableState.value = LocalAlbumAssociationState(local,
-            query = "${LocalMatchAlbum.forComparison(local.name)} $artist".trim(), loading = true)
+            query = "${LocalMatchAlbum.forComparison(local.name)} $artist".trim(), albums = candidates, loading = true)
         batch.pauseForReview()
         request = viewModelScope.launch {
             try {
@@ -68,6 +69,7 @@ class LocalAlbumAssociationViewModel(
                         binding?.album?.id == online.id, token)
                     online != null -> loadAlbum(online, token)
                     binding != null -> preview(binding.album, binding.tracks, true, token)
+                    candidates.isNotEmpty() -> mutableState.update { it?.copy(loading = false) }
                     else -> {
                         mutableState.update { it?.copy(loading = false) }
                         searchAlbums()
@@ -226,6 +228,11 @@ class LocalAlbumAssociationViewModel(
         openOnline(online, emptyList(), fromHub = true)
     }
 
+    fun openBatchRow(row: AlbumBatchRow) {
+        returnHub = mutableHub.value ?: returnHub
+        open(row.local, fromHub = true, candidates = row.candidates)
+    }
+
     fun close() {
         if (busy()) return
         ++generation
@@ -321,6 +328,9 @@ class LocalAlbumAssociationViewModel(
                     local.source == LocalTrackSource.MELODIA_DOWNLOAD
                 }
                 val decision = decisions.getValue(local.uri.toString())
+                val reusable = AlbumScopedMatchPolicy.evaluate(candidate(local), valid).takeIf {
+                    it.status == AlbumScopedMatchStatus.MATCH && it.match?.id in links
+                }?.match
                 when {
                     local.source == LocalTrackSource.MELODIA_DOWNLOAD -> AlbumSongMatchRow(local,
                         AlbumSongMatchStatus.EXISTING, valid.firstOrNull { it.id == existing },
@@ -328,8 +338,8 @@ class LocalAlbumAssociationViewModel(
                     existing != null -> AlbumSongMatchRow(local, AlbumSongMatchStatus.EXISTING,
                         valid.firstOrNull { it.id == existing } ?: confirmed[existing], decision.candidates,
                         "保留已有歌曲关联；更换请使用歌曲菜单中的单曲关联入口")
-                    decision.status == AlbumScopedMatchStatus.MATCH && decision.match!!.id in links ->
-                        AlbumSongMatchRow(local, AlbumSongMatchStatus.EXISTING, decision.match, decision.candidates,
+                    reusable != null ->
+                        AlbumSongMatchRow(local, AlbumSongMatchStatus.EXISTING, reusable, decision.candidates,
                             "同一在线歌曲已有本地音源，保留原关联；更换请使用歌曲菜单中的单曲关联入口")
                     else -> AlbumSongMatchRow(local, when (decision.status) {
                         AlbumScopedMatchStatus.MATCH -> AlbumSongMatchStatus.READY

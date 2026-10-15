@@ -70,7 +70,8 @@ fun LocalMatchingHubDialog(
     onSearch: () -> Unit,
     onChooseLocal: (LocalAlbum) -> Unit,
     onChooseOnline: (Album) -> Unit,
-    onSongs: () -> Unit
+    onSongs: () -> Unit,
+    onAlbums: () -> Unit
 ) {
     val listState = rememberLazyListState()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -114,7 +115,10 @@ fun LocalMatchingHubDialog(
                     item(key = "album-heading") {
                         Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text("专辑匹配", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Text("两边选定同一张专辑后再匹配歌曲。",
+                            Button(onClick = { hideKeyboard(); onAlbums() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("专辑批量匹配与核验")
+                            }
+                            Text("可批量查找并跳过已匹配；也可在下方从任一边手动对应专辑。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

@@ -66,7 +66,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 
 enum class AlbumSongMatchStatus(val label: String) {
-    READY("可自动"), REVIEW("待确认"), NO_MATCH("未匹配"), EXISTING("已有关联"), SAVED("已关联"), ERROR("出错")
+    READY("可自动"), REVIEW("待核验"), NO_MATCH("未命中"), EXISTING("已有关联"), SAVED("已关联"), ERROR("出错")
 }
 
 data class AlbumSongMatchRow(
