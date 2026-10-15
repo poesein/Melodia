@@ -47,7 +47,8 @@ import com.lin0721.linmusic.feature.playlist.ui.PlaylistSongOptionsSheet
 @Composable
 fun LocalTrackActionsHost(
     viewModel: LocalMusicViewModel,
-    navigation: LocalMusicNavigation
+    navigation: LocalMusicNavigation,
+    showOnlineAssociation: Boolean = true
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -158,7 +159,7 @@ fun LocalTrackActionsHost(
         }
     }
 
-    onlineAssociation?.let { association ->
+    onlineAssociation?.takeIf { showOnlineAssociation }?.let { association ->
         LocalOnlineAssociationSheet(
             state = association,
             onDismiss = { viewModel.closeOnlineAssociation() },

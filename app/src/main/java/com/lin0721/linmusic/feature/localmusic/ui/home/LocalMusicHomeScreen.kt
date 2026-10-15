@@ -84,8 +84,10 @@ import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchStatus
 import com.lin0721.linmusic.feature.localmusic.data.batch.BatchLocalMatchRepository
 import com.lin0721.linmusic.feature.localmusic.ui.BatchLocalMatchSheet
 import com.lin0721.linmusic.feature.localmusic.ui.BatchMatchFilter
-import com.lin0721.linmusic.feature.localmusic.ui.BatchReportCompletion
-import com.lin0721.linmusic.feature.localmusic.ui.nextBatchReportIndex
+import com.lin0721.linmusic.feature.localmusic.ui.BatchReviewSession
+import com.lin0721.linmusic.feature.localmusic.ui.batchUnresolvedUris
+import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchRow
+import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.feature.localmusic.ui.LocalLibraryStateGate
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicNavigation
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicUiState
@@ -120,10 +122,9 @@ fun LocalMusicHomeScreen(
     var showImportSheet by remember { mutableStateOf(false) }
     var showCreatePlaylist by remember { mutableStateOf(false) }
     var showBatchMatch by remember { mutableStateOf(false) }
-    var returnToBatchAfterAssociation by remember { mutableStateOf<BatchReportCompletion?>(null) }
-    var associationBaselineSequence by remember { mutableStateOf(0L) }
-    var pendingReportCompletion by remember { mutableStateOf<BatchReportCompletion?>(null) }
-    var batchFilter by rememberSaveable { mutableStateOf(BatchMatchFilter.ALL) }
+    var reviewSession by remember { mutableStateOf<BatchReviewSession?>(null) }
+    var reviewBaselineSequence by remember { mutableStateOf(0L) }
+    var batchFilter by rememberSaveable { mutableStateOf(BatchMatchFilter.REVIEW) }
     val batchListState = rememberLazyListState()
     val uiScope = rememberCoroutineScope()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
@@ -133,33 +134,57 @@ fun LocalMusicHomeScreen(
     val batchRepository: BatchLocalMatchRepository = koinInject()
     val batchState by batchRepository.state.collectAsStateWithLifecycle()
 
-    LaunchedEffect(library.tracks.size) { batchRepository.refresh() }
-    LaunchedEffect(showBatchMatch) {
-        if (showBatchMatch) batchRepository.refresh()
+    fun openReviewItem(session: BatchReviewSession) {
+        val row = batchRepository.state.value.rows.firstOrNull { it.local.uri.toString() == session.currentUri } ?: return
+        viewModel.openOnlineAssociation(
+            library.tracks.firstOrNull { it.uri == row.local.uri } ?: row.local,
+            initialCandidates = (row.candidates + listOfNotNull(row.matchedTrack)).distinctBy { it.id }
+        )
     }
-    LaunchedEffect(onlineAssociation, returnToBatchAfterAssociation, associationCompletion) {
-        val returning = returnToBatchAfterAssociation
-        if (returning != null && onlineAssociation == null) {
-            if (associationCompletion?.localUri == returning.localUri &&
-                (associationCompletion?.sequence ?: 0L) > associationBaselineSequence) {
-                pendingReportCompletion = returning
-            }
-            batchRepository.refreshAfterManualAssociation()
-            returnToBatchAfterAssociation = null
-            showBatchMatch = true
+
+    fun beginReview(row: BatchLocalMatchRow? = null): Boolean {
+        if (viewModel.associationSavingUri.value != null || viewModel.onlineAssociation.value != null) return false
+        val session = BatchReviewSession.start(batchRepository.state.value.rows, batchFilter, row?.local?.uri?.toString()) ?: return false
+        // Also catch an automatic pass still initializing before isRunning becomes true.
+        batchRepository.pauseForReview()
+        reviewBaselineSequence = viewModel.associationCompletion.value?.sequence ?: 0L
+        reviewSession = session
+        openReviewItem(session)
+        return true
+    }
+
+    fun advanceReview(completedUri: String? = null) {
+        if (viewModel.associationSavingUri.value != null) return
+        val current = reviewSession ?: return
+        val remaining = batchUnresolvedUris(batchRepository.state.value.rows) - setOfNotNull(completedUri)
+        val next = current.advance(remaining)
+        reviewBaselineSequence = viewModel.associationCompletion.value?.sequence ?: 0L
+        reviewSession = next
+        if (next == null) viewModel.closeOnlineAssociation() else openReviewItem(next)
+    }
+
+    fun confirmReview(online: Track, expectedUri: String?) {
+        val current = viewModel.onlineAssociation.value ?: return
+        val local = current.track
+        // A second tap from the old frame must never associate its candidate to the next file.
+        if (expectedUri == null || local.uri.toString() != expectedUri || current.results.none { it.id == online.id }) return
+        val completed = viewModel.associationCompletion.value
+        if (completed?.localUri == local.uri.toString() && completed.sequence > reviewBaselineSequence) return
+        viewModel.linkOnlineAssociation(local, online, closeOnSuccess = false) {
+            batchRepository.recordManualAssociation(local, online)
         }
     }
-    LaunchedEffect(batchState.rows, batchState.isLoading, pendingReportCompletion, showBatchMatch) {
-        val completed = pendingReportCompletion ?: return@LaunchedEffect
-        if (!showBatchMatch || batchState.isLoading) return@LaunchedEffect
-        val row = batchState.rows.firstOrNull { it.local.uri.toString() == completed.localUri }
-        if (row?.status != BatchLocalMatchStatus.MATCHED && row?.status != BatchLocalMatchStatus.ALREADY_LINKED) return@LaunchedEffect
-        val visible = batchState.rows.filter { batchFilter.accepts(it.status) }
-        nextBatchReportIndex(completed.previousIndex,
-            completedStillVisible = visible.any { it.local.uri.toString() == completed.localUri },
-            visibleUris = visible.map { it.local.uri.toString() },
-            nextLocalUri = completed.nextLocalUri)?.let { batchListState.scrollToItem(it) }
-        pendingReportCompletion = null
+
+    LaunchedEffect(library.tracks.size) { batchRepository.refresh() }
+    LaunchedEffect(showBatchMatch) {
+        if (showBatchMatch) batchRepository.refreshIfNeeded()
+    }
+    LaunchedEffect(associationCompletion?.sequence, associationSavingUri, showBatchMatch) {
+        val completed = associationCompletion ?: return@LaunchedEffect
+        if (showBatchMatch && associationSavingUri == null &&
+            completed.sequence > reviewBaselineSequence && reviewSession?.currentUri == completed.localUri) {
+            advanceReview(completed.localUri)
+        }
     }
 
     val importFilesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -231,48 +256,53 @@ fun LocalMusicHomeScreen(
         }
     }
 
-    LocalTrackActionsHost(viewModel = viewModel, navigation = navigation)
+    LocalTrackActionsHost(viewModel = viewModel, navigation = navigation, showOnlineAssociation = !showBatchMatch)
 
     if (showBatchMatch) {
+        val renderedReviewUri = onlineAssociation?.track?.uri?.toString()
         BatchLocalMatchSheet(
             state = batchState,
             filter = batchFilter,
             onFilterChange = {
-                batchFilter = it
-                pendingReportCompletion = null
-                uiScope.launch { batchListState.scrollToItem(0) }
+                if (batchFilter != it) {
+                    batchFilter = it
+                    uiScope.launch { batchListState.scrollToItem(0) }
+                }
             },
             listState = batchListState,
             savingUri = associationSavingUri,
-            onDismiss = { showBatchMatch = false },
+            onDismiss = {
+                if (viewModel.associationSavingUri.value == null) {
+                    viewModel.closeOnlineAssociation()
+                    reviewSession = null
+                    showBatchMatch = false
+                }
+            },
             onStartOrResume = batchRepository::startOrResume,
             onPause = batchRepository::pause,
             onRetryUnmatched = batchRepository::retryUnmatched,
             onRefresh = batchRepository::refresh,
-            onManualAssociation = { row ->
-                val visible = batchState.rows.filter { batchFilter.accepts(it.status) }
-                val index = visible.indexOfFirst { it.local.uri == row.local.uri }.coerceAtLeast(0)
-                associationBaselineSequence = associationCompletion?.sequence ?: 0L
-                returnToBatchAfterAssociation = BatchReportCompletion(row.local.uri.toString(),
-                    index, visible.getOrNull(index + 1)?.local?.uri?.toString())
-                showBatchMatch = false
-                viewModel.openOnlineAssociation(
-                    library.tracks.firstOrNull { it.uri == row.local.uri } ?: row.local,
-                    initialCandidates = (row.candidates + listOfNotNull(row.matchedTrack)).distinctBy { it.id }
-                )
-            },
+            onManualAssociation = { row -> beginReview(row) },
             onLinkCandidate = { row, track ->
-                val visible = batchState.rows.filter { batchFilter.accepts(it.status) }
-                val index = visible.indexOfFirst { it.local.uri == row.local.uri }.coerceAtLeast(0)
-                val cursor = BatchReportCompletion(row.local.uri.toString(),
-                    index, visible.getOrNull(index + 1)?.local?.uri?.toString())
-                viewModel.linkOnlineAssociation(
-                    library.tracks.firstOrNull { it.uri == row.local.uri } ?: row.local, track
-                ) {
-                    pendingReportCompletion = cursor
-                    batchRepository.refreshAfterManualAssociation()
+                if (beginReview(row)) confirmReview(track, row.local.uri.toString())
+            },
+            associationState = onlineAssociation,
+            reviewPosition = reviewSession?.positionLabel,
+            onCloseReview = {
+                if (viewModel.associationSavingUri.value == null &&
+                    renderedReviewUri == viewModel.onlineAssociation.value?.track?.uri?.toString()) {
+                    viewModel.closeOnlineAssociation()
+                    reviewSession = null
                 }
-            }
+            },
+            onSkipReview = {
+                if (renderedReviewUri == viewModel.onlineAssociation.value?.track?.uri?.toString()) advanceReview()
+            },
+            onReviewQueryChange = viewModel::updateOnlineAssociationQuery,
+            onReviewSearch = { viewModel.searchOnlineAssociation() },
+            onReviewLoadMore = { viewModel.searchOnlineAssociation(loadMore = true) },
+            onReviewConfirm = { track -> confirmReview(track, renderedReviewUri) },
+            onStartReview = { beginReview() }
         )
     }
 
@@ -437,7 +467,6 @@ private fun BatchMatchEntryCard(state: BatchLocalMatchState, onOpen: () -> Unit,
     val pending = state.count(BatchLocalMatchStatus.PENDING)
     val errors = state.count(BatchLocalMatchStatus.ERROR)
     val resumable = pending + errors + state.count(BatchLocalMatchStatus.NO_MATCH) + state.count(BatchLocalMatchStatus.NEEDS_CONFIRMATION)
-    val unmatched = state.totalCount - matched - pending
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm)
             .clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surface)
@@ -448,27 +477,23 @@ private fun BatchMatchEntryCard(state: BatchLocalMatchState, onOpen: () -> Unit,
             Column(Modifier.weight(1f).pressable(MelodiaPress.Card, onClick = onOpen)) {
                 Text("匹配网易云", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    if (state.isLoading) "正在读取本地关联…" else "已匹配 $matched · 未匹配 $unmatched · 待处理 $pending",
+                    if (state.isLoading) "正在读取本地关联…" else "已匹配 $matched · 待处理 $resumable",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Button(onClick = if (state.isRunning || resumable == 0) onOpen else onStart,
+            Button(onClick = onOpen,
                 enabled = !state.isLoading) {
                 Text(when {
                     state.isRunning -> "查看进度"
                     resumable == 0 -> "查看结果"
-                    pending == 0 && resumable > errors -> "继续未匹配"
-                    errors > 0 && pending == 0 -> "重试出错"
-                    pending == 0 -> "继续未匹配"
-                    state.processedCount > 0 -> "继续匹配"
-                    else -> "开始匹配"
+                    else -> "处理待处理"
                 })
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("自动核对并保存关联，明显的歌名序号会忽略。", modifier = Modifier.weight(1f),
+            Text("逐首确认可连续处理；自动匹配重新核对未成功项。", modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (resumable > 0 || state.isRunning) TextButton(onClick = onOpen) { Text("查看结果") }
+            if (resumable > 0 && !state.isRunning) TextButton(onClick = onStart, enabled = !state.isLoading) { Text("自动匹配") }
         }
     }
 }

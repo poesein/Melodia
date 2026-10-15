@@ -32,9 +32,58 @@ class BatchLocalMatchRepository(
     private var runningJob: Job? = null
     private var initialized = false
     private var pausing = false
+    @Volatile private var activeRow: BatchLocalMatchRow? = null
 
     fun refresh() { scope.launch { commandMutex.withLock { refreshRows() } } }
     fun refreshAfterManualAssociation() = refresh()
+
+    /** Reopening a report with an unchanged library must not re-read and rewrite every result. */
+    fun refreshIfNeeded() {
+        scope.launch { commandMutex.withLock { if (!initialized) refreshRows() } }
+    }
+
+    /**
+     * Called after the reference edit succeeds. Only affected rows are checked and persisted, then
+     * published together. Storage errors propagate so callers can report a saved-reference/report error.
+     */
+    suspend fun recordManualAssociation(local: LocalTrack, online: Track) = withContext(Dispatchers.IO) {
+        commandMutex.withLock { storeMutex.withLock {
+            val current = state.value.rows
+            if (current.isEmpty()) return@withLock
+            val selectedUri = local.uri.toString()
+            val oldRow = current.firstOrNull { it.local.uri.toString() == selectedUri }
+            val relatedIds = setOfNotNull(online.id.takeIf { it > 0L }, local.songId,
+                oldRow?.local?.songId, oldRow?.matchedTrack?.id)
+            val affected = affectedManualReportUris(current.map { row ->
+                ManualReportRowReference(row.local.uri.toString(), row.local.title, row.local.songId, row.matchedTrack?.id)
+            }, selectedUri, local.title, relatedIds)
+            val playable = HashMap<Long, Track?>()
+            val changed = LinkedHashMap<String, BatchLocalMatchRow>()
+            val affectedRows = current.filter { it.local.uri.toString() in affected }
+            val confirmed = preferredAudio.confirmedForLocalTracks(affectedRows.map { it.local })
+            affectedRows.forEach { row ->
+                val uri = row.local.uri.toString()
+                val linked = confirmed[uri]
+                val existing = if (linked == null) row.matchedTrack?.id?.let { id ->
+                    if (!playable.containsKey(id)) playable[id] = preferredAudio.confirmedPlayableTrack(id)
+                    playable[id]
+                }?.takeIf {
+                    BatchOnlineMatchPolicy.evaluate(candidateFor(row.local), listOf(it)).status == BatchOnlineMatchStatus.MATCHED
+                } else null
+                val update = reconcileManualReportRow(row.status, row.matchedTrack?.id, linked, existing,
+                    selected = uri == selectedUri) ?: return@forEach
+                val reconciled = row.copy(local = row.local.copy(songId = linked?.id),
+                    status = update.status, matchedTrack = update.track,
+                    candidates = update.track?.let(::listOf) ?: row.candidates,
+                    reason = update.reason, usesExistingSource = update.usesExistingSource, updatedAtMs = now())
+                if (reconciled != row) changed[uri] = reconciled
+            }
+            if (changed.isNotEmpty()) {
+                store.writeRows(changed.values.toList())
+                mutableState.update { it.copy(rows = it.rows.map { row -> changed[row.local.uri.toString()] ?: row }) }
+            }
+        } }
+    }
 
     fun startOrResume() {
         scope.launch {
@@ -61,12 +110,54 @@ class BatchLocalMatchRepository(
     fun pause() {
         scope.launch {
             // Do not hold a lock while waiting for a cancelled row commit.
-            val toCancel = commandMutex.withLock { pausing = true; runningJob }
+            val toCancel = commandMutex.withLock {
+                if (pausing) return@launch
+                pausing = true
+                runningJob
+            }
             toCancel?.cancelAndJoin()
             commandMutex.withLock {
                 pausing = false
                 refreshRows() // A preference edit can finish immediately before cancellation; reconcile that confirmed reference.
+                activeRow = null
                 setRunState(false, "已暂停，已完成结果保留；点击继续接着处理")
+            }
+        }
+    }
+
+    /** Review opens immediately; cancel background work without a full-library refresh on its way out. */
+    fun pauseForReview() {
+        scope.launch {
+            val toCancel = commandMutex.withLock {
+                if (pausing || runningJob?.isActive != true) return@launch
+                pausing = true
+                runningJob!!
+            }
+            var issue: String? = null
+            try {
+                toCancel.cancelAndJoin()
+                // A preference write can finish just before cancellation reaches the report commit.
+                // Reconcile that one actual reference without delaying review behind the whole library.
+                activeRow?.let { row ->
+                    preferredAudio.confirmedForLocalTrack(row.local)?.let { track ->
+                        recordManualAssociation(row.local, track)
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { issue = "本条记录核对失败：${error.message.orEmpty().take(120)}；可手动刷新重试" }
+            finally {
+                withContext(NonCancellable) {
+                    commandMutex.withLock {
+                        activeRow = null
+                        if (runningJob === toCancel) runningJob = null
+                        val message = "已暂停自动匹配，可逐首处理候选；已完成结果保留" + (issue?.let { "；$it" } ?: "")
+                        try { setRunState(false, message) }
+                        catch (error: Exception) {
+                            mutableState.update { it.copy(isRunning = false,
+                                message = "$message；暂停状态保存失败：${error.message.orEmpty().take(120)}") }
+                        } finally { pausing = false }
+                    }
+                }
             }
         }
     }
@@ -127,8 +218,14 @@ class BatchLocalMatchRepository(
         try {
             val halted = BatchMatchRunner(
                 nextPending = { state.value.rows.firstOrNull { it.status == BatchLocalMatchStatus.PENDING } },
-                process = { row: BatchLocalMatchRow -> processRow(row, queryCache) },
-                commit = ::commitRow
+                process = { row: BatchLocalMatchRow ->
+                    activeRow = row
+                    processRow(row, queryCache)
+                },
+                commit = { row ->
+                    commitRow(row)
+                    activeRow = null
+                }
             ).run()
             setRunState(false, halted ?: "本轮匹配完成；可直接处理剩余候选，或点击继续重新匹配未成功项")
         } catch (cancelled: CancellationException) {

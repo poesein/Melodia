@@ -58,6 +58,15 @@ internal class BatchLocalMatchStore(context: Context) : SQLiteOpenHelper(context
         }
     }
 
+    fun writeRows(rows: List<BatchLocalMatchRow>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            rows.forEach(::writeRow)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
     fun runMessage(): String? = readableDatabase.query("run_state", null, "id=1", null, null, null, null).use {
         if (!it.moveToFirst()) null else if (it.getInt(it.getColumnIndexOrThrow("running")) == 1) {
             "上次匹配因应用退出而暂停，点击继续即可接着处理"
