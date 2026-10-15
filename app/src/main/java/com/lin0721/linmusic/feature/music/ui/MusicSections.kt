@@ -15,6 +15,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,13 +46,13 @@ import java.time.ZoneId
 
 // 曲风页各段共用的标题
 @Composable
-fun MusicSectionTitle(title: String, trailing: String? = null) {
+fun MusicSectionTitle(title: String, trailing: String? = null, onSearchClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = MusicEdgePadding, end = MusicEdgePadding, top = 19.dp, bottom = 11.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Bottom
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = title,
@@ -61,6 +65,11 @@ fun MusicSectionTitle(title: String, trailing: String? = null) {
         )
         trailing?.let {
             Text(text = it, color = TextGray, fontSize = 11.5.sp, modifier = Modifier.padding(start = 8.dp))
+        }
+        onSearchClick?.let { action ->
+            IconButton(onClick = action) {
+                Icon(Icons.Rounded.Search, contentDescription = "搜索音乐", tint = MaterialTheme.colorScheme.onSurface)
+            }
         }
     }
 }

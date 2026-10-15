@@ -3,6 +3,7 @@ package com.lin0721.linmusic.core.preferences
 // 移动端及大屏底部导航栏候选项目
 enum class BottomBarItem(val key: String, val title: String, val isRoute: Boolean) {
     HOME("home", "主页", true),
+    MUSIC("music", "音乐", true),
     SEARCH("search", "搜索", true),
     LIBRARY("library", "音乐库", true),
     CREATE("create", "创建", false),
@@ -31,6 +32,7 @@ object BottomBarLayout {
 
     val DEFAULT: List<BottomBarItemSetting> = listOf(
         BottomBarItemSetting(BottomBarItem.HOME, true),
+        BottomBarItemSetting(BottomBarItem.MUSIC, true),
         BottomBarItemSetting(BottomBarItem.SEARCH, true),
         BottomBarItemSetting(BottomBarItem.LIBRARY, true),
         BottomBarItemSetting(BottomBarItem.CREATE, true),
@@ -58,7 +60,18 @@ object BottomBarLayout {
             val item = BottomBarItem.fromKey(parts[0].trim()) ?: return@mapNotNull null
             BottomBarItemSetting(item, visible = parts.getOrNull(1)?.trim() == "1")
         }
-        return normalize(parsed)
+        return normalize(migrateMusicEntry(parsed))
+    }
+
+    private fun migrateMusicEntry(layout: List<BottomBarItemSetting>): List<BottomBarItemSetting> {
+        if (layout.any { it.item == BottomBarItem.MUSIC }) return layout
+        val migrated = layout.toMutableList()
+        val homeIndex = migrated.indexOfFirst { it.item == BottomBarItem.HOME }
+        // Preserve all selected items in a full custom layout; the new entry can
+        // be enabled explicitly in settings. Legacy defaults have room for it.
+        migrated.add(if (homeIndex >= 0) homeIndex + 1 else 0,
+            BottomBarItemSetting(BottomBarItem.MUSIC, layout.count { it.visible } < MAX_VISIBLE_ITEMS))
+        return migrated
     }
 
     // 去重、补齐缺失项并修正可见数量上下限

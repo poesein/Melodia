@@ -3,11 +3,41 @@ package com.lin0721.linmusic.feature.localmusic.data
 import com.lin0721.linmusic.feature.localmusic.data.db.LocalTrackEntity
 import com.lin0721.linmusic.feature.localmusic.data.scan.resolveArtistAndTitle
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
+import com.lin0721.linmusic.feature.localmusic.data.metadata.LocalAudioMetadata
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LocalLibrarySyncTest {
+
+    @Test
+    fun `imported wave tag refresh retains reference association dates and decoded audio facts`() {
+        val old = entity("content://provider/document/track.wav", source = LocalTrackSource.IMPORTED).copy(
+            songId = 123L, mediaStoreId = 456L, path = "/legacy/track.wav", dateAddedMs = 10L,
+            dateModifiedMs = 20L, durationMs = 210000L, sizeBytes = 123456L)
+        val refreshed = mergeRefreshedImportedTags(old, LocalAudioMetadata("真歌名", "演唱者", "真专辑", "专辑歌手", 2012, 3))
+
+        assertEquals(old.copy(title = "真歌名", artist = "演唱者", album = "真专辑", albumArtist = "专辑歌手",
+            year = 2012, trackNumber = 3), refreshed)
+    }
+
+    @Test
+    fun `imported wave refresh changes only successfully read tag values`() {
+        val old = entity("content://provider/document/track.wav", source = LocalTrackSource.IMPORTED)
+            .copy(title = " Existing title ", album = "Existing album", albumArtist = "Existing credit", year = 2001, trackNumber = 2)
+        val refreshed = mergeRefreshedImportedTags(old, LocalAudioMetadata(artist = "New artist"))
+
+        assertEquals(old.copy(artist = "New artist"), refreshed)
+        assertEquals(old, mergeRefreshedImportedTags(old, LocalAudioMetadata()))
+    }
+
+    @Test
+    fun `invalid imported wave tags cannot clear previously stored metadata`() {
+        val old = entity("content://provider/document/track.wav", source = LocalTrackSource.IMPORTED)
+            .copy(album = "Album", albumArtist = "Credit", year = 2001, trackNumber = 2)
+        assertEquals(old, mergeRefreshedImportedTags(old,
+            LocalAudioMetadata("<unknown>", " ", "<UNKNOWN>", "", 0, -1)))
+    }
 
     private fun entity(
         uri: String,

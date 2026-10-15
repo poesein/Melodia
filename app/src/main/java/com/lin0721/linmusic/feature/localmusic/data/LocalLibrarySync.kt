@@ -2,11 +2,23 @@ package com.lin0721.linmusic.feature.localmusic.data
 
 import com.lin0721.linmusic.feature.localmusic.data.db.LocalTrackEntity
 import com.lin0721.linmusic.feature.localmusic.domain.LocalTrackSource
+import com.lin0721.linmusic.feature.localmusic.data.metadata.LocalAudioMetadata
+import com.lin0721.linmusic.feature.localmusic.data.metadata.cleanAudioTag
 
 data class LocalLibrarySyncDiff(
     val upserts: List<LocalTrackEntity>,
     val deleteUris: Set<String>
 )
+
+/** Metadata refresh must retain the imported reference, associations, scan dates and audio facts. */
+internal fun mergeRefreshedImportedTags(existing: LocalTrackEntity, embedded: LocalAudioMetadata): LocalTrackEntity {
+    return existing.copy(title = cleanAudioTag(embedded.title) ?: existing.title,
+        artist = cleanAudioTag(embedded.artist) ?: existing.artist,
+        album = cleanAudioTag(embedded.album) ?: existing.album,
+        albumArtist = cleanAudioTag(embedded.albumArtist) ?: existing.albumArtist,
+        year = embedded.year?.takeIf { it > 0 } ?: existing.year,
+        trackNumber = embedded.trackNumber?.takeIf { it > 0 } ?: existing.trackNumber)
+}
 
 // 只写入变化的条目；导入条目扫不到不代表已删，由 isImportedAlive 判断
 fun computeLocalLibrarySyncDiff(

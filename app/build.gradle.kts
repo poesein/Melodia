@@ -37,7 +37,10 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.lin0721.linmusic"
+        // Optional personal build; the upstream defaults remain intact when properties are absent.
+        applicationId = (project.findProperty("personalApplicationId") as String?) ?: "com.lin0721.linmusic"
+        manifestPlaceholders["appLabel"] = (project.findProperty("personalAppLabel") as String?) ?: "@string/app_name"
+        buildConfigField("String", "UPDATE_OWNER", "\"${(project.findProperty("personalUpdateOwner") as String?) ?: "rinchao0721"}\"")
         minSdk = 26
         targetSdk = 36
         // CI 打 tag 发布时通过 -PreleaseVersionCode/-PreleaseVersionName 覆盖，本地构建保持默认值

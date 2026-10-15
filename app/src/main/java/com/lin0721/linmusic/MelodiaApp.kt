@@ -183,6 +183,7 @@ fun MelodiaApp() {
     LaunchedEffect(bottomBarLayout) {
         val firstRoute = bottomBarLayout.firstOrNull { it.visible && it.item.isRoute }
         val rootScreen = when (firstRoute?.item) {
+            BottomBarItem.MUSIC -> Screen.Music
             BottomBarItem.SEARCH -> Screen.Search
             BottomBarItem.LIBRARY -> Screen.Library
             BottomBarItem.LOCAL_MUSIC -> Screen.LocalMusic
@@ -478,6 +479,7 @@ fun MelodiaApp() {
                                     homeTab = navigation.homeTab,
                                     showMusicNewWorks = navigation.showMusicNewWorks,
                                     searchAutoFocus = navigation.searchAutoFocus,
+                                    searchReturnsToOrigin = navigation.canReturnFromSearch,
                                     onOpenSidebar = { sidebar.open() },
                                     onLoginScreenVisibilityChanged = { isLoginScreenVisible = it },
                                     onNavigateToPlaylist = { id, isAlbum -> navigation.openPlaylist(id, isAlbum) },
@@ -492,6 +494,7 @@ fun MelodiaApp() {
                                     onNavigateToLocalMusic = { navigation.openLocalMusic() },
                                     onNavigateToScreen = { navigation.navigateTo(it) },
                                     onOpenRecognition = { showRecognition = true },
+                                    onExitSearch = { navigation.returnFromSearch() },
                                     onBack = { handleBack() }
                                 )
                             }
