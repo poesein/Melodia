@@ -88,6 +88,10 @@ val LocalTrack.primaryArtist: String get() = splitArtists(artist).first()
 
 private val LocalTrack.albumOwner: String get() = localAlbumOwner(artist, albumArtist)
 
+// SAF document IDs provide album directory evidence without inventing a filesystem path.
+internal val LocalTrack.albumGroupingFolder: String?
+    get() = localAlbumFolderOf(path, uri.toString())
+
 // 单条曲目的传统专辑身份；完整曲库中的目录合辑必须通过 LocalLibraryIndex 查询。
 val LocalTrack.albumKey: String
     get() = albumTitle?.let { "$it|$albumOwner" } ?: UNKNOWN_ALBUM_KEY
@@ -104,7 +108,7 @@ private val albumTrackOrder = compareBy<LocalTrack>(
 
 fun buildLocalLibraryIndex(tracks: List<LocalTrack>): LocalLibraryIndex {
     val identities = resolveLocalAlbumGroups(tracks.map {
-        LocalAlbumGroupMetadata(it.album, it.artist, it.albumArtist, it.folderPath)
+        LocalAlbumGroupMetadata(it.album, it.artist, it.albumArtist, it.albumGroupingFolder)
     })
     val albumKeysByUri = tracks.indices.associate { tracks[it].uri.toString() to identities[it].key }
     val albums = tracks.indices.groupBy { identities[it].key }.map { (key, indices) ->

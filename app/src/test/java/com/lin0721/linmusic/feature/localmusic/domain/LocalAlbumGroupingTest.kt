@@ -111,4 +111,96 @@ class LocalAlbumGroupingTest {
             assertEquals(listOf("$title|Artist A", "$title|Artist B"), groups.map { it.key })
         }
     }
+
+    @Test
+    fun `album directory abbreviations and rip annotations do not split a compilation`() {
+        val groups = resolveLocalAlbumGroups(List(50) {
+            entry("Performer ${it % 36}", path = "/sdcard/Music/50 Classical [FLAC]")
+        })
+        assertEquals(1, groups.map { it.key }.distinct().size)
+        assertEquals("Various Artists", groups.first().owner)
+    }
+
+    @Test
+    fun `system album artists copied from performers do not split fifty tracks`() {
+        val groups = resolveLocalAlbumGroups(List(50) {
+            val artist = "Performer ${it % 36}"
+            entry(artist, albumArtist = artist)
+        })
+        val unlabelled = resolveLocalAlbumGroups(List(50) { entry("Performer ${it % 36}") })
+        assertEquals(1, groups.map { it.key }.distinct().size)
+        assertEquals(unlabelled.first().key, groups.first().key)
+    }
+
+    @Test
+    fun `unknown album artist sentinels and partially copied artist fields are missing evidence`() {
+        val groups = resolveLocalAlbumGroups(listOf(entry("Artist A", albumArtist = "<unknown>"),
+            entry("Artist B", albumArtist = " Artist B "), entry("Artist C")))
+        assertEquals(1, groups.map { it.key }.distinct().size)
+        assertEquals("Artist A", localAlbumOwner("Artist A", " <UNKNOWN> "))
+    }
+
+    @Test
+    fun `performer lists copied in a different order are not genuine album artists`() {
+        val groups = resolveLocalAlbumGroups(listOf(
+            entry("Conductor A / Orchestra A", albumArtist = "Orchestra A / Conductor A"),
+            entry("Conductor B / Orchestra B", albumArtist = "Orchestra B / Conductor B")))
+        assertEquals(1, groups.map { it.key }.distinct().size)
+    }
+
+    @Test
+    fun `explicit various artists retains its existing album key`() {
+        val groups = resolveLocalAlbumGroups(listOf(entry("Artist A", albumArtist = "Various Artists"),
+            entry("Artist B", albumArtist = "Various Artists")))
+        assertEquals(listOf("$title|Various Artists", "$title|Various Artists"), groups.map { it.key })
+    }
+
+    @Test
+    fun `conflicting genuine album artists never infer a directory compilation`() {
+        val groups = resolveLocalAlbumGroups(listOf(entry("Artist A", albumArtist = "Album Owner A"),
+            entry("Artist B", albumArtist = "Album Owner B")))
+        assertEquals(listOf("$title|Album Owner A", "$title|Album Owner B"), groups.map { it.key })
+    }
+
+    @Test
+    fun `another album in the directory does not split the correctly named compilation`() {
+        val groups = resolveLocalAlbumGroups(listOf(entry("Artist A"), entry("Artist B"),
+            entry("Artist C", album = "Another Album")))
+        assertEquals(groups[0].key, groups[1].key)
+        assertNotEquals(groups[0].key, groups[2].key)
+    }
+
+    @Test
+    fun `imported external storage documents form one album without filesystem paths`() {
+        val groups = resolveLocalAlbumGroups(List(50) {
+            val id = "primary%3AMusic%2F50%20Classical%20Masterworks%2F${it + 1}.flac"
+            entry("Performer ${it % 36}", path = localAlbumFolderOf(null,
+                "content://com.android.externalstorage.documents/tree/primary%3AMusic/document/$id"))
+        })
+        assertEquals(1, groups.map { it.key }.distinct().size)
+        assertEquals(title, groups.first().name)
+    }
+
+    @Test
+    fun `generic collection folders do not merge unrelated same named albums`() {
+        listOf("Music", "Downloads", "音乐", "Inbox", "Compilation").forEach { name ->
+            val groups = resolveLocalAlbumGroups(listOf(entry("Artist A", path = "/sdcard/$name"),
+                entry("Artist B", path = "/sdcard/$name")))
+            assertEquals(listOf("$title|Artist A", "$title|Artist B"), groups.map { it.key })
+        }
+    }
+
+    @Test
+    fun `internal unknown artist placeholder is not a genuine album owner`() {
+        val groups = resolveLocalAlbumGroups(listOf(entry("Artist A", albumArtist = UNKNOWN_ARTIST_NAME),
+            entry("Artist B")))
+        assertEquals(1, groups.map { it.key }.distinct().size)
+    }
+
+    @Test
+    fun `short titles cannot accidentally match arbitrary directory names`() {
+        val groups = resolveLocalAlbumGroups(listOf(entry("Artist A", album = "A", path = "/sdcard/Random"),
+            entry("Artist B", album = "A", path = "/sdcard/Random")))
+        assertEquals(listOf("A|Artist A", "A|Artist B"), groups.map { it.key })
+    }
 }

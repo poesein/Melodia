@@ -377,11 +377,11 @@ class LocalAlbumAssociationViewModel(
             val live = tracks.firstOrNull { it.uri == track.uri } ?: return@withContext null
             // Only this folder can affect a contextual album key; avoid sorting the whole library
             // into artists/cards again for every song in a large album's guarded write loop.
-            val folder = live.folderPath
-            val peers = if (folder == null) listOf(live) else tracks.filter { it.folderPath == folder }
+            val folder = live.albumGroupingFolder
+            val peers = if (folder == null) listOf(live) else tracks.filter { it.albumGroupingFolder == folder }
             val index = peers.indexOfFirst { it.uri == live.uri }
             val identities = resolveLocalAlbumGroups(peers.map {
-                LocalAlbumGroupMetadata(it.album, it.artist, it.albumArtist, it.folderPath)
+                LocalAlbumGroupMetadata(it.album, it.artist, it.albumArtist, it.albumGroupingFolder)
             })
             live.takeIf { identities[index].key == localAlbumKey }
         }
