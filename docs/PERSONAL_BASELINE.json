@@ -9,6 +9,6 @@
   "signing_certificate_sha256": "068c0ad458b50c506a4cc38c4799c3fd3a8fb18a16e713eecc7490493ba3de5a",
   "automatic_upstream_sync": false,
   "automatic_release_publication": false,
-  "current_version_name": "2.0.0-beta.11",
-  "current_version_code": 2000011
+  "current_version_name": "2.0.0-beta.12",
+  "current_version_code": 2000012
 }

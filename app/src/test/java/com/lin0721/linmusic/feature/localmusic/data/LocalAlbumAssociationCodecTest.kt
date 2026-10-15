@@ -4,11 +4,14 @@ import com.lin0721.linmusic.core.model.Album
 import com.lin0721.linmusic.core.model.Artist
 import com.lin0721.linmusic.core.model.SongPrivilege
 import com.lin0721.linmusic.core.model.Track
+import com.lin0721.linmusic.feature.localmusic.domain.AlbumCompletion
+import com.lin0721.linmusic.feature.localmusic.domain.AlbumReviewPolicy
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -85,6 +88,7 @@ class LocalAlbumAssociationCodecTest {
             original.copy(tracks = emptyList()),
             original.copy(tracks = listOf(Track(id = -1L))),
             original.copy(tracks = listOf(original.tracks.first(), original.tracks.first())),
+            original.copy(reviewedLocalFingerprint = "not a valid fingerprint"),
         )
         invalid.forEach { value ->
             try {
@@ -93,6 +97,41 @@ class LocalAlbumAssociationCodecTest {
             } catch (_: IllegalArgumentException) {
                 // Rejected before entering DataStore.edit.
             }
+        }
+    }
+
+    @Test
+    fun `legacy JSON without review metadata preserves scope without inventing manual completion`() {
+        val original = binding()
+        val encoded = LocalAlbumAssociationCodec.encode(original)
+        assertTrue(!encoded.contains("reviewedLocalFingerprint"))
+        val restored = LocalAlbumAssociationCodec.decodeEntries(mapOf(
+            LocalAlbumAssociationCodec.keyFor(original.localAlbumKey) to encoded)).getValue(original.localAlbumKey)
+        assertEquals(original, restored)
+        assertNull(restored.reviewedLocalFingerprint)
+        assertEquals(AlbumCompletion.NONE,
+            AlbumReviewPolicy.completion("a".repeat(64), restored.reviewedLocalFingerprint, 1, 2))
+    }
+
+    @Test
+    fun `manual confirmation survives restart without claiming unsaved songs were linked`() {
+        val original = binding().copy(reviewedLocalFingerprint = "a".repeat(64))
+        val restored = LocalAlbumAssociationCodec.decodeEntries(mapOf(entry(original))).getValue(original.localAlbumKey)
+        assertEquals(original, restored)
+        assertEquals(AlbumCompletion.MANUALLY_REVIEWED,
+            AlbumReviewPolicy.completion("a".repeat(64), restored.reviewedLocalFingerprint, 0, 2))
+        assertEquals(AlbumCompletion.NONE,
+            AlbumReviewPolicy.completion("b".repeat(64), restored.reviewedLocalFingerprint, 0, 2))
+    }
+
+    @Test
+    fun `corrupt optional review metadata drops only confirmation and preserves cached tracks`() {
+        val original = binding()
+        listOf("\"broken\"", "123", "{}", "[]", "null").forEach { invalid ->
+            val encoded = LocalAlbumAssociationCodec.encode(original)
+                .replaceFirst("{", "{\"reviewedLocalFingerprint\":$invalid,")
+            assertEquals(mapOf(original.localAlbumKey to original), LocalAlbumAssociationCodec.decodeEntries(mapOf(
+                LocalAlbumAssociationCodec.keyFor(original.localAlbumKey) to encoded)))
         }
     }
 

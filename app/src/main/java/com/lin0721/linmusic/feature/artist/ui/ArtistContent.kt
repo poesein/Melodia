@@ -117,9 +117,9 @@ fun ArtistContent(
     var showMoreMenuSheet by remember { mutableStateOf(false) }
     var showAlbumMinimumDialog by remember { mutableStateOf(false) }
     var showCatalogSheet by remember { mutableStateOf(false) }
-    val catalogSelection = remember(albums, catalogState.enabled, catalogState.groups, catalogState.artistMbid) {
+    val catalogSelection = remember(albums, catalogState.enabled, catalogState.groups, catalogState.artistMbid, albumMinTracks) {
         catalogState.groups?.takeIf { catalogState.enabled }?.let {
-            ArtistCatalogMatcher.select(albums, it, boundArtistMbid = catalogState.artistMbid)
+            ArtistCatalogMatcher.select(albums, it, boundArtistMbid = catalogState.artistMbid, minTracks = albumMinTracks)
         }
     }
     val visibleAlbums = remember(albums, catalogSelection, albumMinTracks) {

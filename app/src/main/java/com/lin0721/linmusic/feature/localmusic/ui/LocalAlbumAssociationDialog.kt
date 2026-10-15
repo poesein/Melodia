@@ -85,6 +85,7 @@ data class LocalAlbumAssociationState(
     val onlineTracks: List<Track> = emptyList(),
     val rows: List<AlbumSongMatchRow> = emptyList(),
     val bindingSaved: Boolean = false,
+    val reviewCompleted: Boolean = false,
     val loading: Boolean = false,
     val running: Boolean = false,
     val savingUri: String? = null,
@@ -210,7 +211,11 @@ fun LocalAlbumAssociationDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(if (state.bindingSaved) "已保存专辑对应" else "确认后保存专辑对应",
+                                    Text(when {
+                                        state.reviewCompleted -> "专辑已人工核验 · 已完成"
+                                        state.bindingSaved -> "已保存专辑对应 · 尚未人工核验"
+                                        else -> "确认后保存专辑对应"
+                                    },
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     TextButton(onClick = {
@@ -219,6 +224,9 @@ fun LocalAlbumAssociationDialog(
                                     }, enabled = !busy && !state.loading) { Text("更换专辑") }
                                 }
                                 Text("仅在已选专辑内匹配；歌手署名和发行版本可不同，录音版本差异仍需核对。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("确认专辑后移入已完成并跳过后续批量；未关联歌曲仍可单独处理。",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("可自动 $readyCount · 待处理 ${pendingCount - readyCount} · 已关联 $linkedCount",
@@ -233,12 +241,12 @@ fun LocalAlbumAssociationDialog(
                                         onApply()
                                     }, modifier = Modifier.fillMaxWidth(),
                                         enabled = !busy && !state.loading && state.onlineTracks.isNotEmpty() &&
-                                            (!state.bindingSaved || readyCount > 0)) {
+                                            (!state.reviewCompleted || readyCount > 0)) {
                                         Text(when {
-                                            readyCount > 0 && state.bindingSaved -> "匹配剩余 $readyCount 首"
+                                            readyCount > 0 && state.reviewCompleted -> "匹配剩余 $readyCount 首"
                                             readyCount > 0 -> "确认专辑并匹配 $readyCount 首"
-                                            state.bindingSaved -> "专辑对应已保存"
-                                            else -> "保存专辑对应"
+                                            state.reviewCompleted -> "专辑核验已完成"
+                                            else -> "确认专辑并完成核验"
                                         })
                                     }
                                 }

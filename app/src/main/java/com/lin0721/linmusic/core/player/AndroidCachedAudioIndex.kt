@@ -6,7 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import com.lin0721.linmusic.core.download.DownloadPreferences
 import com.lin0721.linmusic.core.offline.CachedAudioIndex
 import com.lin0721.linmusic.core.preferences.SettingsPreferences
-import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
+import com.lin0721.linmusic.core.localmusic.LocalMusicApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.combine
@@ -20,15 +20,15 @@ class AndroidCachedAudioIndex(
     private val context: Context,
     private val downloadPreferences: DownloadPreferences,
     private val settingsPreferences: SettingsPreferences,
-    private val preferredLocalAudio: PreferredLocalAudioRepository
+    private val localMusicApi: LocalMusicApi
 ) : CachedAudioIndex {
 
-    override val changes: Flow<Unit> = combine(preferredLocalAudio.changes, downloadPreferences.records) { _, _ -> Unit }
+    override val changes: Flow<Unit> = combine(localMusicApi.availabilityChanges, downloadPreferences.records) { _, _ -> Unit }
 
     override suspend fun playableIds(ids: Collection<Long>): Set<Long> = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext emptySet()
         val playable = downloadPreferences.findVerifiedRecords(ids).mapTo(HashSet()) { it.songId }
-        try { playable += preferredLocalAudio.knownPlayableIds(ids) }
+        try { playable += localMusicApi.knownPlayableIds(ids) }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* External-file lookup must not block ordinary downloaded/cache playback. */ }
         val remaining = ids.filterTo(HashSet()) { it !in playable }

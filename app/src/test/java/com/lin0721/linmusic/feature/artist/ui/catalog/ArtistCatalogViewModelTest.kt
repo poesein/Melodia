@@ -74,6 +74,38 @@ class ArtistCatalogViewModelTest {
         } finally { store.clear(); Dispatchers.resetMain() }
     }
 
+    @Test fun choosingTheSameBoundArtistResumesAnInterruptedCatalogueRead() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(dispatcher)
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val transport = FakeTransport().apply {
+            beforeGet = { if (requests == 1) { started.complete(Unit); release.await() } }
+        }
+        val preferences = FakePreferences(ArtistCatalogPreference(true, MBID, "Example Artist"))
+        val model = ArtistCatalogViewModel(repository(preferences, transport, dispatcher))
+        val store = ViewModelStore().apply { put("catalog", model) }
+        try {
+            model.updateArtistContext(artist, albums)
+            runCurrent()
+            assertTrue(started.isCompleted)
+            assertTrue(model.state.value.loading)
+            model.changeBinding()
+            advanceUntilIdle()
+            assertNull(model.state.value.groups)
+            assertTrue(model.state.value.choosingArtist)
+            model.bind(model.state.value.candidates.single())
+            advanceUntilIdle()
+            assertEquals(MBID, model.state.value.artistMbid)
+            assertEquals(2, model.state.value.groups?.size)
+            assertFalse(model.state.value.loading)
+            assertFalse(model.state.value.saving)
+            assertFalse(model.state.value.choosingArtist)
+            assertNull(model.state.value.error)
+            assertEquals(3, transport.requests)
+        } finally { release.complete(Unit); store.clear(); Dispatchers.resetMain() }
+    }
+
     @Test fun oneAlbumLeavesCandidatesForExplicitChoiceAndLaterPageCanConfirmIdentity() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(dispatcher)
@@ -400,8 +432,10 @@ class ArtistCatalogViewModelTest {
     private class FakeTransport : ArtistCatalogTransport {
         var requests = 0
         var fail = false
+        var beforeGet: suspend () -> Unit = {}
         override suspend fun get(url: okhttp3.HttpUrl): ArtistCatalogHttpResponse {
             requests++
+            beforeGet()
             if (fail) return ArtistCatalogHttpResponse(503, "{}")
             if (url.encodedPath.endsWith("/artist")) return ArtistCatalogHttpResponse(200,
                 """{"count":1,"offset":0,"artists":[{"id":"$MBID","name":"Example Artist","aliases":[]}]}""")

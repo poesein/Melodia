@@ -167,3 +167,23 @@ suspend fun resolvePreferredLocalAudio(
     val uri = automaticUri() ?: return null
     return uri.takeIf { isReadable(it) }
 }
+
+data class LocalAudioSelectionSettings(val enabled: Boolean, val manualUri: String?, val automaticEnabled: Boolean)
+
+/** Revalidate user intent after a potentially slow metadata lookup, without issuing another lookup. */
+suspend fun resolveCurrentPreferredLocalAudio(
+    initial: LocalAudioSelectionSettings,
+    latestSettings: suspend () -> LocalAudioSelectionSettings,
+    automaticUri: suspend () -> String?,
+    isReadable: suspend (String) -> Boolean,
+): String? {
+    var automatic: String? = null
+    val resolved = resolvePreferredLocalAudio(initial.enabled, initial.manualUri, initial.automaticEnabled,
+        automaticUri = { automaticUri().also { automatic = it } }, isReadable = isReadable)
+    val latest = latestSettings()
+    if (latest == initial) return resolved
+    // A removed manual choice is not an automatic candidate. A newly selected unreadable manual
+    // file still falls back to the ordinary player instead of silently playing the old candidate.
+    return resolvePreferredLocalAudio(latest.enabled, latest.manualUri, latest.automaticEnabled,
+        automaticUri = { automatic }, isReadable = isReadable)
+}

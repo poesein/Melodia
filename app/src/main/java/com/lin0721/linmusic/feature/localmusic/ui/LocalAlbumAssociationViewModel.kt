@@ -8,6 +8,7 @@ import com.lin0721.linmusic.feature.localmusic.data.LocalAlbumAssociation
 import com.lin0721.linmusic.feature.localmusic.data.LocalAlbumAssociationStore
 import com.lin0721.linmusic.feature.localmusic.data.LocalLibraryRepository
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
+import com.lin0721.linmusic.feature.localmusic.data.localAlbumMatchFingerprint
 import com.lin0721.linmusic.feature.localmusic.data.batch.BatchLocalMatchRepository
 import com.lin0721.linmusic.feature.localmusic.domain.*
 import com.lin0721.linmusic.feature.playlist.data.PlaylistRepository
@@ -349,8 +350,12 @@ class LocalAlbumAssociationViewModel(
                 }
             }
         }
+        val binding = store.associations.first()[current.local.key]
+        val reviewed = binding?.album?.id == album.id &&
+            binding?.reviewedLocalFingerprint == localAlbumMatchFingerprint(current.local)
         if (token == generation) mutableState.update { it?.copy(selected = album, onlineTracks = valid,
-            rows = rows, loading = false, bindingSaved = saved, error = null, message = null) }
+            rows = rows, loading = false, bindingSaved = saved, reviewCompleted = reviewed,
+            error = null, message = null) }
     }
 
     fun changeAlbum() {
@@ -358,13 +363,38 @@ class LocalAlbumAssociationViewModel(
         request?.cancel()
         ++generation
         mutableState.update { it?.copy(selected = null, onlineTracks = emptyList(), rows = emptyList(),
-            loading = false, bindingSaved = false, error = null, message = null) }
+            loading = false, bindingSaved = false, reviewCompleted = false, error = null, message = null) }
         if (mutableState.value?.albums.isNullOrEmpty()) searchAlbums()
     }
 
-    private suspend fun saveScope(current: LocalAlbumAssociationState) {
-        store.put(LocalAlbumAssociation(current.local.key, requireNotNull(current.selected), current.onlineTracks))
-        mutableState.update { it?.copy(bindingSaved = true) }
+    private suspend fun liveFingerprint(localAlbumKey: String): String? = withContext(Dispatchers.Default) {
+        buildLocalLibraryIndex(library.tracks.first()).album(localAlbumKey)?.let(::localAlbumMatchFingerprint)
+    }
+
+    private suspend fun saveScope(current: LocalAlbumAssociationState): LocalAlbumAssociation {
+        val fingerprint = localAlbumMatchFingerprint(current.local)
+        check(liveFingerprint(current.local.key) == fingerprint) { "本地专辑内容已变化，请重新打开核对" }
+        val existing = store.associations.first()[current.local.key]
+        val reviewed = existing?.reviewedLocalFingerprint.takeIf {
+            existing?.album?.id == current.selected?.id && it == fingerprint
+        }
+        val binding = LocalAlbumAssociation(current.local.key, requireNotNull(current.selected),
+            current.onlineTracks, reviewed)
+        store.put(binding)
+        mutableState.update { it?.copy(bindingSaved = true, reviewCompleted = reviewed != null) }
+        return binding
+    }
+
+    private suspend fun completeReview(current: LocalAlbumAssociationState, binding: LocalAlbumAssociation,
+                                       saveFailed: Boolean): Boolean {
+        val fingerprint = localAlbumMatchFingerprint(current.local)
+        if (!AlbumReviewPolicy.canConfirm(fingerprint, liveFingerprint(current.local.key), stopRequested, saveFailed)) {
+            return false
+        }
+        // Compare-and-set prevents an old dialog from completing a different, newly saved album scope.
+        val completed = store.markReviewed(binding, fingerprint)
+        if (completed) mutableState.update { it?.copy(reviewCompleted = true) }
+        return completed
     }
 
     fun apply() {
@@ -375,13 +405,21 @@ class LocalAlbumAssociationViewModel(
         mutableState.value = current.copy(running = true, error = null, message = "正在保存专辑对应…")
         viewModelScope.launch {
             try {
-                saveScope(current)
+                batch.pauseAndAwaitForAlbumMatching()
+                val binding = saveScope(current)
+                var saveFailed = false
                 for (row in current.rows.filter { it.status == AlbumSongMatchStatus.READY }) {
                     if (stopRequested || token != generation) break
-                    val online = row.online ?: continue
+                    val online = row.online
+                    if (online == null) {
+                        saveFailed = true
+                        updateRow(row.local, AlbumSongMatchStatus.ERROR, "候选歌曲信息缺失，请重新检查")
+                        continue
+                    }
                     mutableState.update { it?.copy(savingUri = row.local.uri.toString(), message = "正在关联：${row.local.title}") }
                     val live = library.tracks.first().firstOrNull { it.uri == row.local.uri && it.albumKey == current.local.key }
                     if (live == null) {
+                        saveFailed = true
                         updateRow(row.local, AlbumSongMatchStatus.ERROR, "本地曲目已移出这张专辑，请重新打开核对")
                         mutableState.update { it?.copy(savingUri = null) }
                         continue
@@ -396,14 +434,24 @@ class LocalAlbumAssociationViewModel(
                             updateRow(row.local, AlbumSongMatchStatus.SAVED,
                                 if (reportIssue) "关联已保存；匹配报告可稍后刷新恢复" else result.reason, online)
                         }
-                        BatchAssociationSaveStatus.CONFLICT, BatchAssociationSaveStatus.CHANGED ->
+                        BatchAssociationSaveStatus.CONFLICT, BatchAssociationSaveStatus.CHANGED -> {
+                            saveFailed = true
                             updateRow(row.local, AlbumSongMatchStatus.REVIEW, result.reason)
-                        BatchAssociationSaveStatus.UNREADABLE -> updateRow(row.local, AlbumSongMatchStatus.ERROR, result.reason)
+                        }
+                        BatchAssociationSaveStatus.UNREADABLE -> {
+                            saveFailed = true
+                            updateRow(row.local, AlbumSongMatchStatus.ERROR, result.reason)
+                        }
                     }
                     mutableState.update { it?.copy(savingUri = null) }
                     yield()
                 }
-                mutableState.update { it?.copy(message = if (stopRequested) "已暂停，已完成关联保留" else "本轮完成；可直接处理剩余候选") }
+                val completed = completeReview(current, binding, saveFailed)
+                mutableState.update { it?.copy(message = when {
+                    completed -> "专辑已核验，已移入已完成；未关联歌曲仍可在这里单独处理"
+                    stopRequested -> "已暂停，已保存的歌曲关联保留；专辑核验尚未完成"
+                    else -> "部分歌曲未能保存或专辑内容已变化；请检查后重新确认"
+                }) }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { fail(token, "本轮处理未完成，已保存的对应与歌曲关联保留；可重试。") }
             finally { if (token == generation) mutableState.update { it?.copy(running = false, savingUri = null) } }
@@ -421,17 +469,22 @@ class LocalAlbumAssociationViewModel(
             current.onlineTracks.none { it.id == online.id } || current.rows.none { it.local.uri == local.uri }) return
         val target = current.onlineTracks.first { it.id == online.id }
         val token = generation
+        stopRequested = false
         mutableState.value = current.copy(savingUri = local.uri.toString(), error = null)
         viewModelScope.launch {
             try {
+                batch.pauseAndAwaitForAlbumMatching()
                 val live = library.tracks.first().firstOrNull { it.uri == local.uri && it.albumKey == current.local.key }
                     ?: error("本地曲目已移出此专辑")
-                saveScope(current)
+                val binding = saveScope(current)
                 when (val result = commitManualAssociation({ preferred.linkLocalTrack(live, target) },
                     { batch.recordManualAssociation(live, target) })) {
                     ManualAssociationCommitResult.Unreadable -> updateRow(local, AlbumSongMatchStatus.ERROR,
                         "文件不可读取，请检查授权或选择其他本地文件")
                     is ManualAssociationCommitResult.Saved -> {
+                        val reviewed = try { completeReview(current, binding, saveFailed = false) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { false }
                         // Reconcile this album too: a manual choice can displace another row's reference.
                         var previewIssue = false
                         try { preview(requireNotNull(current.selected), current.onlineTracks, true, token) }
@@ -440,6 +493,9 @@ class LocalAlbumAssociationViewModel(
                         updateRow(local, AlbumSongMatchStatus.SAVED,
                             if (result.reportError == null && !previewIssue) "已手动关联"
                             else "关联已保存；列表与报告可稍后刷新恢复", target)
+                        mutableState.update { it?.copy(message = if (reviewed)
+                            "专辑已核验，已移入已完成；其他歌曲可继续单独处理"
+                            else "歌曲关联已保存；专辑核验尚未保存，请重新打开确认") }
                     }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -456,7 +512,7 @@ class LocalAlbumAssociationViewModel(
         viewModelScope.launch {
             try {
                 store.remove(current.local.key)
-                if (token == generation) mutableState.update { it?.copy(bindingSaved = false,
+                if (token == generation) mutableState.update { it?.copy(bindingSaved = false, reviewCompleted = false,
                     message = "已解除专辑对应，已有歌曲关联全部保留") }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { fail(token, "解除专辑对应失败，请重试。") }

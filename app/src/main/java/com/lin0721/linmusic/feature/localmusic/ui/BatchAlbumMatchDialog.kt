@@ -137,7 +137,7 @@ fun BatchAlbumMatchDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     item(key = "controls") {
                         Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("逐张搜索网易云专辑，再匹配专辑内歌曲。已匹配专辑会跳过，待核验的专辑可点开核对。",
+                            Text("逐张搜索网易云专辑，再匹配专辑内歌曲。歌曲全部关联或人工确认后进入已完成，后续批量会跳过。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Button(onClick = {
@@ -147,7 +147,7 @@ fun BatchAlbumMatchDialog(
                                 enabled = state.running || (!state.loading && hasRemaining)) {
                                 Text(when {
                                     state.running -> "暂停，保留已完成结果"
-                                    state.rows.isNotEmpty() && !hasRemaining -> "全部专辑已匹配"
+                                    state.rows.isNotEmpty() && !hasRemaining -> "全部专辑已完成"
                                     hasStarted -> "继续匹配未完成专辑"
                                     else -> "开始批量匹配"
                                 })
@@ -167,7 +167,7 @@ fun BatchAlbumMatchDialog(
                         }
                     }
                     item(key = "counts") {
-                        Text("已匹配 ${counts[AlbumBatchFilter.MATCHED] ?: 0} · 待核验 ${counts[AlbumBatchFilter.REVIEW] ?: 0}" +
+                        Text("已完成 ${counts[AlbumBatchFilter.MATCHED] ?: 0} · 待核验 ${counts[AlbumBatchFilter.REVIEW] ?: 0}" +
                             " · 未处理 ${counts[AlbumBatchFilter.UNPROCESSED] ?: 0}" +
                             " · 未命中 ${counts[AlbumBatchFilter.NO_MATCH] ?: 0} · 出错 ${counts[AlbumBatchFilter.ERROR] ?: 0}",
                             style = MaterialTheme.typography.labelLarge)
@@ -231,7 +231,7 @@ private fun AlbumBatchFilter.acceptsAlbum(status: AlbumBatchStatus): Boolean = w
 
 private fun AlbumBatchFilter.albumFilterLabel(): String = when (this) {
     AlbumBatchFilter.ALL -> "全部"
-    AlbumBatchFilter.MATCHED -> "已匹配"
+    AlbumBatchFilter.MATCHED -> "已完成"
     AlbumBatchFilter.REVIEW -> "待核验"
     AlbumBatchFilter.UNPROCESSED -> "未处理"
     AlbumBatchFilter.NO_MATCH -> "未命中"
@@ -241,7 +241,7 @@ private fun AlbumBatchFilter.albumFilterLabel(): String = when (this) {
 private fun AlbumBatchStatus.albumStatusLabel(): String = when (this) {
     AlbumBatchStatus.UNPROCESSED -> "未处理"
     AlbumBatchStatus.SEARCHING -> "匹配中"
-    AlbumBatchStatus.MATCHED -> "已匹配"
+    AlbumBatchStatus.MATCHED -> "已完成"
     AlbumBatchStatus.REVIEW -> "待核验"
     AlbumBatchStatus.NO_MATCH -> "未命中"
     AlbumBatchStatus.ERROR -> "出错"

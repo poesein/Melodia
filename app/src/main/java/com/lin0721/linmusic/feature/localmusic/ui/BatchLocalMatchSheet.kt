@@ -82,10 +82,10 @@ fun BatchLocalMatchSheet(
     onFilterChange: (BatchMatchFilter) -> Unit,
     listState: LazyListState,
     savingUri: String?,
+    openingReview: Boolean,
     onDismiss: () -> Unit,
     onStartOrResume: () -> Unit,
     onPause: () -> Unit,
-    onRetryUnmatched: () -> Unit,
     onRefresh: () -> Unit,
     onManualAssociation: (BatchLocalMatchRow) -> Unit,
     onLinkCandidate: (BatchLocalMatchRow, Track) -> Unit,
@@ -167,13 +167,24 @@ fun BatchLocalMatchSheet(
                                 overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (state.isLoading) Text("正在读取曲库和匹配记录…", style = MaterialTheme.typography.bodySmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(onClick = onStartReview, enabled = unresolvedCount > 0 && !saving) { Text("连续处理") }
-                            if (state.isRunning) TextButton(onClick = onPause) { Text("暂停自动匹配") }
-                            else TextButton(onClick = onStartOrResume, enabled = unresolvedCount > 0 && !state.isLoading) {
-                                Text(if (state.processedCount == 0) "自动匹配" else "重试未匹配")
+                        // Automatic creation stays discoverable at every font scale. Manual review
+                        // is a separate action and never silently replaces the batch-start button.
+                        Button(onClick = if (state.isRunning) onPause else onStartOrResume,
+                            enabled = !saving && !openingReview && !state.isLoading &&
+                                (state.isRunning || unresolvedCount > 0), modifier = Modifier.fillMaxWidth()) {
+                            Text(when {
+                                state.isRunning -> "暂停自动匹配"
+                                state.processedCount == 0 -> "开始自动匹配"
+                                else -> "继续自动匹配"
+                            })
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = onStartReview,
+                                enabled = unresolvedCount > 0 && !saving && !state.isLoading && !openingReview) {
+                                Text(if (openingReview) "正在准备核验…" else "人工核验 · 连续处理")
                             }
-                            TextButton(onClick = onRefresh, enabled = !state.isRunning && !state.isLoading) { Text("刷新") }
+                            TextButton(onClick = onRefresh,
+                                enabled = !state.isRunning && !state.isLoading && !saving && !openingReview) { Text("刷新曲库") }
                         }
                     }
                     FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -192,7 +203,8 @@ fun BatchLocalMatchSheet(
                                 modifier = Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         items(visibleRows, key = { it.local.uri.toString() }) { row ->
-                            BatchLocalMatchResultRow(row, savingUri, displayedCovers, onManualAssociation, onLinkCandidate)
+                            BatchLocalMatchResultRow(row, savingUri, displayedCovers, onManualAssociation, onLinkCandidate,
+                                enabled = !state.isLoading && !openingReview)
                             HorizontalDivider()
                         }
                     }
@@ -204,7 +216,9 @@ fun BatchLocalMatchSheet(
 
 @Composable
 private fun BatchLocalMatchResultRow(row: BatchLocalMatchRow, savingUri: String?, displayedCovers: Map<Long, String>,
-    onManualAssociation: (BatchLocalMatchRow) -> Unit, onLinkCandidate: (BatchLocalMatchRow, Track) -> Unit) {
+    onManualAssociation: (BatchLocalMatchRow) -> Unit, onLinkCandidate: (BatchLocalMatchRow, Track) -> Unit,
+    enabled: Boolean) {
+    val canInteract = enabled && savingUri == null
     val linked = !row.status.isUnresolved()
     val statusText = when (row.status) {
         BatchLocalMatchStatus.PENDING -> "未开始"
@@ -215,7 +229,7 @@ private fun BatchLocalMatchResultRow(row: BatchLocalMatchRow, savingUri: String?
         BatchLocalMatchStatus.ERROR -> "出错"
     }
     Column(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth().clickable(enabled = savingUri == null,
+        Row(Modifier.fillMaxWidth().clickable(enabled = canInteract,
             onClickLabel = "查看 ${row.local.title} 的匹配候选") { onManualAssociation(row) },
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             LocalCover(sourceUri = row.local.uri, size = 48.dp)
@@ -232,10 +246,10 @@ private fun BatchLocalMatchResultRow(row: BatchLocalMatchRow, savingUri: String?
         row.matchedTrack?.let { BatchOnlineTrackDetails(it, displayedCovers[it.id]) }
         val singleCandidate = row.candidates.singleOrNull()?.takeUnless { linked }
         if (singleCandidate != null) BatchOnlineTrackDetails(singleCandidate, displayedCovers[singleCandidate.id],
-            onClick = { onLinkCandidate(row, singleCandidate) }, enabled = savingUri == null)
+            onClick = { onLinkCandidate(row, singleCandidate) }, enabled = canInteract)
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { if (singleCandidate != null) onLinkCandidate(row, singleCandidate) else onManualAssociation(row) },
-                enabled = savingUri == null) {
+                enabled = canInteract) {
                 Text(when {
                     savingUri == row.local.uri.toString() -> "正在关联…"
                     singleCandidate != null -> "选用并关联"
@@ -244,7 +258,7 @@ private fun BatchLocalMatchResultRow(row: BatchLocalMatchRow, savingUri: String?
                     else -> "搜索并关联"
                 })
             }
-            if (singleCandidate != null) TextButton(onClick = { onManualAssociation(row) }, enabled = savingUri == null) { Text("其他候选") }
+            if (singleCandidate != null) TextButton(onClick = { onManualAssociation(row) }, enabled = canInteract) { Text("其他候选") }
             if (savingUri == row.local.uri.toString()) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
         }
     }

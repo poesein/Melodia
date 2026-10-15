@@ -1,5 +1,6 @@
 package com.lin0721.linmusic.feature.artist.data.catalog
 
+import com.lin0721.linmusic.BuildConfig
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogPreference
 import java.io.File
 import java.io.IOException
@@ -259,6 +260,8 @@ class ArtistCatalogRepositoryTest {
             assertEquals(200, OkHttpArtistCatalogTransport().get(server.url("/ws/2/artist?fmt=json")).status)
             val request = server.takeRequest()
             assertEquals(ArtistCatalogRepository.USER_AGENT, request.getHeader("User-Agent"))
+            assertTrue(request.getHeader("User-Agent")!!.startsWith("Melodia/${BuildConfig.VERSION_NAME} "))
+            assertTrue(request.getHeader("User-Agent")!!.contains("https://github.com/rinchao0721/Melodia"))
             assertEquals("application/json", request.getHeader("Accept"))
             assertEquals("GET", request.method)
             assertNull(request.getHeader("Cookie"))

@@ -8,7 +8,7 @@ import com.lin0721.linmusic.feature.localmusic.data.LocalAlbumAssociation
 import com.lin0721.linmusic.feature.localmusic.data.LocalAlbumAssociationStore
 import com.lin0721.linmusic.feature.localmusic.data.LocalLibraryRepository
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
-import com.lin0721.linmusic.feature.localmusic.data.batch.AlbumBatchFingerprint
+import com.lin0721.linmusic.feature.localmusic.data.localAlbumMatchFingerprint
 import com.lin0721.linmusic.feature.localmusic.data.batch.AlbumBatchRecord
 import com.lin0721.linmusic.feature.localmusic.data.batch.AlbumBatchStatus as StoredStatus
 import com.lin0721.linmusic.feature.localmusic.data.batch.BatchAlbumMatchStore
@@ -18,7 +18,6 @@ import com.lin0721.linmusic.feature.localmusic.domain.*
 import com.lin0721.linmusic.feature.search.domain.SearchResultItem
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.serialization.json.*
 import java.util.concurrent.ConcurrentHashMap
 
 /** User-started, finite album passes. Only the current row is opened at commit time. */
@@ -88,9 +87,11 @@ class BatchAlbumMatchViewModel(
             val binding = latest.bindings[album.key]
             val saved = latest.records[album.key]?.takeIf { it.fingerprint == fingerprint(album) }
             val linked = linkedCount(album, binding, latest.links, directUris)
+            val completion = AlbumReviewPolicy.completion(fingerprint(album), binding?.reviewedLocalFingerprint,
+                linked, album.tracks.size)
             val status = when {
                 activeKey == album.key -> AlbumBatchStatus.SEARCHING
-                linked == album.tracks.size -> AlbumBatchStatus.MATCHED
+                completion != AlbumCompletion.NONE -> AlbumBatchStatus.MATCHED
                 saved?.status == StoredStatus.ERROR -> AlbumBatchStatus.ERROR
                 binding != null -> AlbumBatchStatus.REVIEW
                 saved?.status == StoredStatus.MATCHED -> AlbumBatchStatus.UNPROCESSED
@@ -100,7 +101,8 @@ class BatchAlbumMatchViewModel(
             AlbumBatchRow(album, status, saved?.candidates.orEmpty(), binding?.album ?: saved?.selected,
                 reason = when {
                     activeKey == album.key -> "正在查找专辑与核对曲目…"
-                    linked == album.tracks.size -> "本专辑歌曲均已有可用关联，后续批量会跳过"
+                    completion == AlbumCompletion.MANUALLY_REVIEWED -> "专辑已人工核验，后续批量会跳过；歌曲关联数量按实际显示"
+                    completion == AlbumCompletion.ALL_SONGS_LINKED -> "本专辑歌曲均已有关联，后续批量会跳过"
                     saved?.status == StoredStatus.ERROR -> saved.reason
                     binding != null -> "专辑已对应；${album.tracks.size - linked} 首歌曲仍待核验或继续处理"
                     saved?.status == StoredStatus.MATCHED -> "歌曲关联已变化，等待重新核对"
@@ -129,10 +131,13 @@ class BatchAlbumMatchViewModel(
                     if (stopRequested) break
                     val latest = inputs ?: snapshot()
                     val local = latest.albums.firstOrNull { it.key == key } ?: continue
-                    if (linkedCount(local, latest.bindings[key], latest.links) == local.tracks.size) continue
+                    val completion = AlbumReviewPolicy.completion(fingerprint(local),
+                        latest.bindings[key]?.reviewedLocalFingerprint,
+                        linkedCount(local, latest.bindings[key], latest.links), local.tracks.size)
+                    if (completion != AlbumCompletion.NONE) continue
                     activeKey = key
                     activeCandidates = emptyList()
-                    mutableState.update { it.copy(current = local.name, message = "已匹配专辑跳过；正在核对当前专辑和曲目") }
+                    mutableState.update { it.copy(current = local.name, message = "已完成专辑跳过；正在核对当前专辑和曲目") }
                     render(latest)
                     try {
                         process(local, latest.bindings[key])
@@ -160,7 +165,7 @@ class BatchAlbumMatchViewModel(
                     if (!stopRequested) delay(450)
                 }
                 mutableState.update { it.copy(message = if (stopRequested) pauseReason ?: "已暂停；已完成结果保留"
-                    else "本轮完成；已匹配会跳过，其余可核验或继续重试") }
+                    else "本轮完成；已完成专辑会跳过，其余可核验或继续重试") }
             } catch (cancelled: CancellationException) {
                 mutableState.update { it.copy(message = "已暂停；已完成结果保留，点击继续处理剩余专辑") }
                 throw cancelled
@@ -352,18 +357,6 @@ class BatchAlbumMatchViewModel(
 
     private fun fingerprint(local: LocalAlbum): String {
         fingerprints[local.key]?.takeIf { it.first == local }?.let { return it.second }
-        return AlbumBatchFingerprint.of(buildJsonObject {
-        put("key", local.key)
-        put("name", local.name)
-        put("artist", local.artist)
-        put("tracks", buildJsonArray {
-            local.tracks.sortedBy { it.uri.toString() }.forEach { track -> add(buildJsonObject {
-                put("uri", track.uri.toString()); put("title", track.title); put("artist", track.artist)
-                put("album", track.album); put("albumArtist", track.albumArtist); put("duration", track.durationMs)
-                put("size", track.sizeBytes); put("number", track.trackNumber); put("source", track.source.name)
-                put("path", track.path); put("year", track.year)
-            }) }
-        })
-        }).also { fingerprints[local.key] = local to it }
+        return localAlbumMatchFingerprint(local).also { fingerprints[local.key] = local to it }
     }
 }

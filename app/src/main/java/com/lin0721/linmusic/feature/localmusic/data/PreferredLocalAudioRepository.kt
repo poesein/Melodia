@@ -3,7 +3,6 @@ package com.lin0721.linmusic.feature.localmusic.data
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.media.MediaMetadataRetriever
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -25,6 +24,8 @@ import com.lin0721.linmusic.feature.localmusic.domain.BatchOnlineMatchStatus
 import com.lin0721.linmusic.feature.localmusic.domain.AlbumScopedMatchPolicy
 import com.lin0721.linmusic.feature.localmusic.domain.AlbumScopedMatchStatus
 import com.lin0721.linmusic.feature.localmusic.domain.resolvePreferredLocalAudio
+import com.lin0721.linmusic.feature.localmusic.domain.resolveCurrentPreferredLocalAudio
+import com.lin0721.linmusic.feature.localmusic.domain.LocalAudioSelectionSettings
 import com.lin0721.linmusic.feature.localmusic.data.transfer.*
 import com.lin0721.linmusic.feature.localmusic.data.batch.batchAssociationGuard
 import java.io.ByteArrayOutputStream
@@ -105,34 +106,10 @@ class PreferredLocalAudioRepository(
         try {
             // OpenDocument grants read access; retain it across restarts, without requesting write access.
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            if (!isReadable(uri.toString())) return@withContext false
-            val metadata = MediaMetadataRetriever()
-            var localTitle: String? = null
-            try {
-                metadata.setDataSource(context, uri)
-                if ((metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) <= 0L) {
-                    return@withContext false
-                }
-                localTitle = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            } finally { metadata.release() }
-            val snapshot = inspectAssociationFile(context, uri.toString())?.toBackupFile()
-            context.preferredLocalAudioDataStore.edit {
-                it[linkKey(songId)] = uri.toString()
-                it.remove(localTitleKey(songId))
-                it.remove(localSnapshotKey(songId))
-                snapshot?.let { value -> it[localSnapshotKey(songId)] = snapshotJson.encodeToString(value) }
-                (snapshot?.title ?: localTitle)?.takeIf(String::isNotBlank)?.let { title -> it[localTitleKey(songId)] = title }
-                onlineTrack?.takeIf { value -> value.id == songId && (value.ar.any { artist -> artist.id > 0L } || value.al.id > 0L) }?.let { value ->
-                    it[titleKey(songId)] = value.name
-                    it[artistKey(songId)] = value.ar.joinToString(" • ") { artist -> artist.name }
-                    it[albumKey(songId)] = value.al.name
-                    value.al.picUrl.takeIf(String::isNotBlank)?.let { cover -> it[albumCoverKey(songId)] = cover }
-                    if (value.al.id > 0L) it[albumIdKey(songId)] = value.al.id
-                    if (value.dt > 0L) it[durationKey(songId)] = value.dt
-                }
-                it[excludedKey] = it[excludedKey].orEmpty() - songId.toString()
-            }
-            true
+            val inspected = inspectAssociationFile(context, uri.toString()) ?: return@withContext false
+            val metadata = onlineTrack?.takeIf { it.id == songId &&
+                (it.ar.any { artist -> artist.id > 0L } || it.al.id > 0L) }
+            saveManualReference(songId, inspected, metadata)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { false }
     }
@@ -143,35 +120,43 @@ class PreferredLocalAudioRepository(
             return@withContext false
         }
         try {
-            // One fresh metadata inspection validates decodability and provides the export snapshot.
             val inspected = inspectAssociationFile(context, track.uri.toString(), track) ?: return@withContext false
-            val snapshot = inspected.toBackupFile()
-            val linksBefore = storedLinks(context.preferredLocalAudioDataStore.data.first())
-            // Descriptor I/O for unrelated references does not hold the serialized preference edit.
-            val plannedIds = ManualLocalAudioAssociations.idsForReadableFile(linksBefore, inspected.uri, inspected.identity) {
-                localAudioIdentity(context, it)
-            }
-            var readable = true
-            context.preferredLocalAudioDataStore.edit { prefs ->
-                // Only refs changed by a concurrent batch/import need fresh checks inside this edit.
-                val oldIds = ManualLocalAudioAssociations.completeReplacementIds(linksBefore, plannedIds, storedLinks(prefs),
-                    inspected.uri, inspected.identity) { localAudioIdentity(context, it) }
-                if (localAudioIdentity(context, inspected.uri) != inspected.identity) { readable = false; return@edit }
-                oldIds.forEach { prefs.remove(linkKey(it)); prefs.remove(localTitleKey(it)); prefs.remove(localSnapshotKey(it)) }
-                prefs[excludedKey] = (prefs[excludedKey].orEmpty() + oldIds.map(Long::toString)) - onlineTrack.id.toString()
-                prefs[linkKey(onlineTrack.id)] = inspected.uri
-                prefs[localTitleKey(onlineTrack.id)] = track.title
-                prefs[titleKey(onlineTrack.id)] = onlineTrack.name
-                prefs[artistKey(onlineTrack.id)] = onlineTrack.ar.joinToString(" • ") { it.name }
-                prefs[albumKey(onlineTrack.id)] = onlineTrack.al.name
-                onlineTrack.al.picUrl.takeIf(String::isNotBlank)?.let { prefs[albumCoverKey(onlineTrack.id)] = it }
-                if (onlineTrack.al.id > 0L) prefs[albumIdKey(onlineTrack.id)] = onlineTrack.al.id
-                prefs[localSnapshotKey(onlineTrack.id)] = snapshotJson.encodeToString(snapshot)
-                if (onlineTrack.dt > 0L) prefs[durationKey(onlineTrack.id)] = onlineTrack.dt
-            }
-            readable
+            saveManualReference(onlineTrack.id, inspected, onlineTrack)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { false }
+    }
+
+    /**
+     * Both manual entry points use one replacement transaction. A file selected before library
+     * import must not keep multiple online IDs and later become ambiguous when it is scanned.
+     * Descriptor inspection occurs before the transaction; only concurrent changes are rechecked.
+     */
+    private suspend fun saveManualReference(songId: Long, inspected: AssociationLocalCandidate, onlineTrack: Track?): Boolean {
+        val linksBefore = storedLinks(context.preferredLocalAudioDataStore.data.first())
+        val plannedIds = ManualLocalAudioAssociations.idsForReadableFile(linksBefore, inspected.uri, inspected.identity) {
+            localAudioIdentity(context, it)
+        }
+        var readable = true
+        context.preferredLocalAudioDataStore.edit { prefs ->
+            val oldIds = ManualLocalAudioAssociations.completeReplacementIds(linksBefore, plannedIds, storedLinks(prefs),
+                inspected.uri, inspected.identity) { localAudioIdentity(context, it) }
+            if (localAudioIdentity(context, inspected.uri) != inspected.identity) { readable = false; return@edit }
+            oldIds.forEach { prefs.remove(linkKey(it)); prefs.remove(localTitleKey(it)); prefs.remove(localSnapshotKey(it)) }
+            // Explicit replacement suppresses automatic resurrection of the displaced online IDs.
+            prefs[excludedKey] = (prefs[excludedKey].orEmpty() + oldIds.map(Long::toString)) - songId.toString()
+            prefs[linkKey(songId)] = inspected.uri
+            prefs[localTitleKey(songId)] = inspected.title
+            prefs[localSnapshotKey(songId)] = snapshotJson.encodeToString(inspected.toBackupFile())
+            onlineTrack?.let {
+                prefs[titleKey(songId)] = it.name
+                prefs[artistKey(songId)] = it.ar.joinToString(" • ") { artist -> artist.name }
+                prefs[albumKey(songId)] = it.al.name
+                it.al.picUrl.takeIf(String::isNotBlank)?.let { cover -> prefs[albumCoverKey(songId)] = cover }
+                if (it.al.id > 0L) prefs[albumIdKey(songId)] = it.al.id
+                if (it.dt > 0L) prefs[durationKey(songId)] = it.dt
+            }
+        }
+        return readable
     }
 
     suspend fun unlinkLocalTrack(track: LocalTrack) = withContext(Dispatchers.IO) {
@@ -376,10 +361,11 @@ class PreferredLocalAudioRepository(
     ): String? = withContext(Dispatchers.IO) {
         if (songId <= 0L) return@withContext null
         val prefs = context.preferredLocalAudioDataStore.data.first()
-        resolvePreferredLocalAudio(
-            enabled = prefs[enabledKey] ?: true,
-            manualUri = prefs[linkKey(songId)],
-            automaticEnabled = (prefs[automaticKey] ?: true) && songId.toString() !in prefs[excludedKey].orEmpty(),
+        fun selection(settings: Preferences) = LocalAudioSelectionSettings(settings[enabledKey] ?: true,
+            settings[linkKey(songId)], (settings[automaticKey] ?: true) && songId.toString() !in settings[excludedKey].orEmpty())
+        resolveCurrentPreferredLocalAudio(
+            initial = selection(prefs),
+            latestSettings = { selection(context.preferredLocalAudioDataStore.data.first()) },
             automaticUri = {
                 val candidates = readableLocalAudioCandidates(context, library.tracks.first().filter {
                     it.source != LocalTrackSource.MELODIA_DOWNLOAD && PreferredLocalAudioMatcher.sameCandidateTitle(title,

@@ -4,6 +4,7 @@ import android.content.Context
 import android.provider.OpenableColumns
 import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.core.network.AppError
+import com.lin0721.linmusic.feature.localmusic.data.LocalLibraryRepository
 import com.lin0721.linmusic.feature.localmusic.data.PreferredLocalAudioRepository
 import com.lin0721.linmusic.feature.localmusic.data.transfer.inspectAssociationFile
 import com.lin0721.linmusic.feature.localmusic.domain.*
@@ -11,6 +12,7 @@ import com.lin0721.linmusic.feature.search.data.SearchRepository
 import com.lin0721.linmusic.feature.search.domain.SearchResultItem
 import com.lin0721.linmusic.feature.search.domain.SearchType
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -21,7 +23,8 @@ class BatchLocalMatchRepository(
     private val context: Context,
     private val preferredAudio: PreferredLocalAudioRepository,
     private val search: SearchRepository,
-    private val covers: LocalMatchCoverRepository
+    private val covers: LocalMatchCoverRepository,
+    private val library: LocalLibraryRepository
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val store = BatchLocalMatchStore(context)
@@ -32,10 +35,35 @@ class BatchLocalMatchRepository(
     private var runningJob: Job? = null
     private var initialized = false
     private var pausing = false
+    private val libraryRefreshRequested = AtomicBoolean(false)
     @Volatile private var activeRow: BatchLocalMatchRow? = null
 
     fun refresh() { scope.launch { commandMutex.withLock { refreshRows() } } }
     fun refreshAfterManualAssociation() = refresh()
+
+    /** Only the explicit refresh action scans MediaStore; report reconciliation stays metadata-only. */
+    fun refreshLibrary() {
+        // Claim before launching so rapid refresh/start/review taps cannot use the old rows.
+        if (!libraryRefreshRequested.compareAndSet(false, true)) return
+        mutableState.update { it.copy(isLoading = true) }
+        scope.launch {
+            try {
+                pauseAndAwaitForAlbumMatching()
+                commandMutex.withLock {
+                    check(library.hasPermission()) { "缺少本地音乐读取权限，请先在本地音乐页面授权" }
+                    library.sync()
+                    // sync commits Room before this snapshot; new files now enter the report.
+                    refreshRows()
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                mutableState.update { it.copy(message = "刷新曲库失败：${error.message.orEmpty().take(160)}；已有匹配记录保留") }
+            } finally {
+                libraryRefreshRequested.set(false)
+                mutableState.update { it.copy(isLoading = libraryRefreshRequested.get()) }
+            }
+        }
+    }
 
     /** Reopening a report with an unchanged library must not re-read and rewrite every result. */
     fun refreshIfNeeded() {
@@ -88,7 +116,7 @@ class BatchLocalMatchRepository(
     fun startOrResume() {
         scope.launch {
             commandMutex.withLock {
-                if (pausing || runningJob?.isActive == true) return@withLock
+                if (libraryRefreshRequested.get() || pausing || runningJob?.isActive == true) return@withLock
                 refreshRows()
                 // One user-started pass revisits unresolved rows, then stops. Confirmed sources stay intact.
                 storeMutex.withLock {
@@ -109,19 +137,9 @@ class BatchLocalMatchRepository(
 
     fun pause() {
         scope.launch {
-            // Do not hold a lock while waiting for a cancelled row commit.
-            val toCancel = commandMutex.withLock {
-                if (pausing) return@launch
-                pausing = true
-                runningJob
-            }
-            toCancel?.cancelAndJoin()
-            commandMutex.withLock {
-                pausing = false
-                refreshRows() // A preference edit can finish immediately before cancellation; reconcile that confirmed reference.
-                activeRow = null
-                setRunState(false, "已暂停，已完成结果保留；点击继续接着处理")
-            }
+            // All pause entry points share the same finally-protected ownership and last-write
+            // reconciliation. A failed progress write must never leave future starts locked out.
+            pauseAndAwaitForAlbumMatching()
         }
     }
 
@@ -222,14 +240,16 @@ class BatchLocalMatchRepository(
                         }
                     }
                 store.replaceLibrary(rows)
-                val message = if (!initialized) store.runMessage() else state.value.message
+                val message = if (store.damagedRowCount > 0)
+                    "已恢复 ${store.damagedRowCount} 条损坏的匹配报告；已确认关联保留"
+                else if (!initialized) store.runMessage() else state.value.message
                 initialized = true
-                mutableState.update { it.copy(rows = rows, isLoading = false, message = message) }
+                mutableState.update { it.copy(rows = rows, isLoading = libraryRefreshRequested.get(), message = message) }
                 if (!state.value.isRunning) store.setRunState(false, message)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
-            mutableState.update { it.copy(isLoading = false, message = "无法读取匹配记录：${error.message.orEmpty().take(160)}") }
+            mutableState.update { it.copy(isLoading = libraryRefreshRequested.get(), message = "无法读取匹配记录：${error.message.orEmpty().take(160)}") }
         }
     }
 

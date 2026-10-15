@@ -56,6 +56,6 @@ val localMusicModule = module {
     single<BatchAlbumDetailApi> { get<Retrofit>().create(BatchAlbumDetailApi::class.java) }
     single { BatchAlbumOnlineRepository(search = get(), api = get(), contentFilter = get()) }
     single { LocalMatchCoverRepository(playerRepository = get()) }
-    single { BatchLocalMatchRepository(androidContext(), preferredAudio = get(), search = get(), covers = get()) }
+    single { BatchLocalMatchRepository(androidContext(), preferredAudio = get(), search = get(), covers = get(), library = get()) }
     single<LocalMusicApi> { LocalMusicApiImpl(coverArtCache = get(), lyricsReader = get(), preferredAudio = get()) }
 }

@@ -7,21 +7,27 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.lin0721.linmusic.core.model.Album
 import com.lin0721.linmusic.core.model.Track
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 
 private val Context.localAlbumAssociationDataStore by preferencesDataStore(name = "local_album_associations")
 
-/** A user-confirmed album scope and its complete online track cache; separate from song references. */
+/** An album scope and online track cache; neither a cached scope nor a preview implies human review. */
 @Serializable
 data class LocalAlbumAssociation(
     val localAlbumKey: String,
     val album: Album,
     val tracks: List<Track>,
+    // Optional for backward compatibility. Old automatic/manual scopes cannot reliably be distinguished.
+    val reviewedLocalFingerprint: String? = null,
 )
 
 class LocalAlbumAssociationStore(private val context: Context) {
@@ -30,7 +36,7 @@ class LocalAlbumAssociationStore(private val context: Context) {
             LocalAlbumAssociationCodec.decodeEntries(prefs.asMap().mapNotNull { (key, value) ->
                 (value as? String)?.let { key.name to it }
             }.toMap())
-        }.distinctUntilChanged()
+        }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     suspend fun put(binding: LocalAlbumAssociation) {
         val encoded = LocalAlbumAssociationCodec.encode(binding)
@@ -43,6 +49,22 @@ class LocalAlbumAssociationStore(private val context: Context) {
         context.localAlbumAssociationDataStore.edit { prefs ->
             prefs.remove(stringPreferencesKey(LocalAlbumAssociationCodec.keyFor(localAlbumKey)))
         }
+    }
+
+    /** Commit review only if the exact scope being reviewed is still the stored scope. */
+    suspend fun markReviewed(expected: LocalAlbumAssociation, fingerprint: String): Boolean {
+        val key = stringPreferencesKey(LocalAlbumAssociationCodec.keyFor(expected.localAlbumKey))
+        var saved = false
+        context.localAlbumAssociationDataStore.edit { prefs ->
+            val current = prefs[key]?.let { encoded ->
+                LocalAlbumAssociationCodec.decodeEntries(mapOf(key.name to encoded))[expected.localAlbumKey]
+            }
+            if (current != null && current == expected) {
+                prefs[key] = LocalAlbumAssociationCodec.encode(current.copy(reviewedLocalFingerprint = fingerprint))
+                saved = true
+            }
+        }
+        return saved
     }
 }
 
@@ -65,7 +87,13 @@ internal object LocalAlbumAssociationCodec {
     fun decodeEntries(entries: Map<String, String>): Map<String, LocalAlbumAssociation> = buildMap {
         entries.forEach { (key, encoded) ->
             if (!key.startsWith(PREFIX)) return@forEach
-            val binding = runCatching { json.decodeFromString<LocalAlbumAssociation>(encoded) }.getOrNull()
+            // Corrupt optional review metadata invalidates only the confirmation, not a useful old scope.
+            val payload = runCatching { json.parseToJsonElement(encoded) as? JsonObject }.getOrNull()
+                ?: return@forEach
+            val review = payload["reviewedLocalFingerprint"] as? JsonPrimitive
+            val compatible = if (review?.isString == true && isFingerprint(review.content)) payload
+                else JsonObject(payload - "reviewedLocalFingerprint")
+            val binding = runCatching { json.decodeFromJsonElement<LocalAlbumAssociation>(compatible) }.getOrNull()
                 ?: return@forEach
             if (isValid(binding) && keyFor(binding.localAlbumKey) == key) put(binding.localAlbumKey, binding)
         }
@@ -73,5 +101,8 @@ internal object LocalAlbumAssociationCodec {
 
     private fun isValid(binding: LocalAlbumAssociation): Boolean = binding.localAlbumKey.isNotBlank() &&
         binding.album.id > 0L && binding.tracks.isNotEmpty() &&
-        binding.tracks.all { it.id > 0L } && binding.tracks.map { it.id }.distinct().size == binding.tracks.size
+        binding.tracks.all { it.id > 0L } && binding.tracks.map { it.id }.distinct().size == binding.tracks.size &&
+        (binding.reviewedLocalFingerprint == null || isFingerprint(binding.reviewedLocalFingerprint))
+
+    private fun isFingerprint(value: String): Boolean = value.matches(Regex("[0-9a-f]{64}"))
 }

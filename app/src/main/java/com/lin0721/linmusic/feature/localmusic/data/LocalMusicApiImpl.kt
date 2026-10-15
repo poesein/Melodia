@@ -11,6 +11,10 @@ class LocalMusicApiImpl(
     private val preferredAudio: PreferredLocalAudioRepository
 ) : LocalMusicApi {
 
+    override val availabilityChanges = preferredAudio.changes
+
+    override suspend fun knownPlayableIds(ids: Collection<Long>): Set<Long> = preferredAudio.knownPlayableIds(ids)
+
     override suspend fun coverUriFor(sourceUri: Uri): Uri? = coverArtCache.coverUriFor(sourceUri)
 
     override suspend fun readLyrics(sourceUri: String): String? = lyricsReader.read(sourceUri)

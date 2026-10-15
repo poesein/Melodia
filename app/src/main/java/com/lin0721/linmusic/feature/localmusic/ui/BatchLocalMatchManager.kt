@@ -15,6 +15,8 @@ import com.lin0721.linmusic.core.ui.components.ToastManager
 import com.lin0721.linmusic.feature.localmusic.data.batch.BatchLocalMatchRepository
 import com.lin0721.linmusic.feature.localmusic.domain.BatchLocalMatchRow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
@@ -31,6 +33,7 @@ fun BatchLocalMatchManager(
     val batchRepository: BatchLocalMatchRepository = koinInject()
     val batchState by batchRepository.state.collectAsStateWithLifecycle()
     var reviewSession by remember { mutableStateOf<BatchReviewSession?>(null) }
+    var openingReview by remember { mutableStateOf(false) }
     var reviewBaselineSequence by remember { mutableStateOf(0L) }
     var batchFilter by rememberSaveable { mutableStateOf(BatchMatchFilter.REVIEW) }
     val batchListState = rememberLazyListState()
@@ -44,15 +47,25 @@ fun BatchLocalMatchManager(
         )
     }
 
-    fun beginReview(row: BatchLocalMatchRow? = null): Boolean {
-        if (viewModel.associationSavingUri.value != null || viewModel.onlineAssociation.value != null) return false
-        val session = BatchReviewSession.start(batchRepository.state.value.rows, batchFilter, row?.local?.uri?.toString()) ?: return false
-        // Also catch an automatic pass still initializing before isRunning becomes true.
-        batchRepository.pauseForReview()
-        reviewBaselineSequence = viewModel.associationCompletion.value?.sequence ?: 0L
-        reviewSession = session
-        openReviewItem(session)
-        return true
+    fun beginReview(row: BatchLocalMatchRow? = null, onOpened: () -> Unit = {}) {
+        if (openingReview || batchRepository.state.value.isLoading ||
+            viewModel.associationSavingUri.value != null || viewModel.onlineAssociation.value != null) return
+        openingReview = true
+        uiScope.launch {
+            try {
+                // A tap may arrive while the automatic pass is preparing its first row. Wait for
+                // its final reference/report reconciliation before selecting fresh review rows.
+                batchRepository.pauseAndAwaitForAlbumMatching()
+                currentCoroutineContext().ensureActive()
+                if (batchRepository.state.value.isLoading) return@launch
+                val session = BatchReviewSession.start(batchRepository.state.value.rows, batchFilter,
+                    row?.local?.uri?.toString()) ?: return@launch
+                reviewBaselineSequence = viewModel.associationCompletion.value?.sequence ?: 0L
+                reviewSession = session
+                openReviewItem(session)
+                onOpened()
+            } finally { openingReview = false }
+        }
     }
 
     fun advanceReview(completedUri: String? = null) {
@@ -104,6 +117,7 @@ fun BatchLocalMatchManager(
         },
         listState = batchListState,
         savingUri = associationSavingUri,
+        openingReview = openingReview,
         onDismiss = {
             if (viewModel.associationSavingUri.value == null) {
                 viewModel.closeOnlineAssociation()
@@ -113,11 +127,10 @@ fun BatchLocalMatchManager(
         },
         onStartOrResume = batchRepository::startOrResume,
         onPause = batchRepository::pause,
-        onRetryUnmatched = batchRepository::retryUnmatched,
-        onRefresh = batchRepository::refresh,
+        onRefresh = batchRepository::refreshLibrary,
         onManualAssociation = { row -> beginReview(row) },
         onLinkCandidate = { row, track ->
-            if (beginReview(row)) confirmReview(track, row.local.uri.toString())
+            beginReview(row) { confirmReview(track, row.local.uri.toString()) }
         },
         associationState = onlineAssociation,
         reviewPosition = reviewSession?.positionLabel,

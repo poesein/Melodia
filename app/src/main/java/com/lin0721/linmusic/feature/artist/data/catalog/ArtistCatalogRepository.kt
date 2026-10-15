@@ -1,6 +1,7 @@
 package com.lin0721.linmusic.feature.artist.data.catalog
 
 import android.content.Context
+import com.lin0721.linmusic.BuildConfig
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogArtist
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogCredit
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogPreference
@@ -245,7 +246,8 @@ class ArtistCatalogRepository internal constructor(
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     companion object {
-        const val USER_AGENT = "MelodiaPersonal/2.0.0-beta.6 (https://github.com/poesein/Melodia)"
+        // Keep the metadata client identity current without coupling it to fork build options.
+        val USER_AGENT = "Melodia/${BuildConfig.VERSION_NAME} (+https://github.com/rinchao0721/Melodia)"
         internal const val SUCCESS_TTL_MS = 7L * 24 * 60 * 60 * 1_000
         internal const val FAILURE_COOLDOWN_MS = 30_000L
         private const val PAGE_SIZE = 100

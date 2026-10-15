@@ -186,6 +186,12 @@ class ArtistCatalogViewModel(private val repository: ArtistCatalogRepository) : 
                 if (!isCurrentContext(generation, source.id)) return@launch
                 proposedBinding = null
                 mutableState.update { it.copy(saving = false, choosingArtist = false, message = null) }
+                // Re-selecting the existing binding may not emit a preference change.
+                // Its catalogue request was cancelled when the picker opened, so resume
+                // that read here unless the binding observer has already started it.
+                if (state.value.artistMbid == candidate.id && state.value.groups == null && !state.value.loading) {
+                    loadCatalogue(candidate.id, force = false)
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { if (isCurrentContext(generation, source.id)) mutableState.update { it.copy(saving = false, error = userError(error)) } }
         }

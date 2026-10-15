@@ -5,29 +5,39 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.net.Uri
-import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.feature.localmusic.domain.*
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 
 /** Independent database: no upstream Room table or migration is changed. One result writes one row. */
 internal class BatchLocalMatchStore(context: Context) : SQLiteOpenHelper(context, "local_audio_batch_match.db", null, 1) {
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = BatchLocalMatchRecordCodec.json
+    var damagedRowCount: Int = 0
+        private set
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE results (uri TEXT PRIMARY KEY NOT NULL, local_json TEXT NOT NULL, result_json TEXT NOT NULL)")
         db.execSQL("CREATE TABLE run_state (id INTEGER PRIMARY KEY, running INTEGER NOT NULL, message TEXT)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-    fun readRows(): List<BatchLocalMatchRow> = readableDatabase.query("results", null, null, null, null, null, "uri").use { cursor ->
-        buildList {
-            while (cursor.moveToNext()) {
-                val local = json.decodeFromString<PersistedLocal>(cursor.getString(cursor.getColumnIndexOrThrow("local_json")))
-                val result = json.decodeFromString<PersistedResult>(cursor.getString(cursor.getColumnIndexOrThrow("result_json")))
-                add(BatchLocalMatchRow(local.toTrack(), result.query, result.status, result.matchedTrack,
-                    result.candidates, result.reason, result.updatedAtMs, result.usesExistingSource))
+    fun readRows(): List<BatchLocalMatchRow> {
+        damagedRowCount = 0
+        return readableDatabase.query("results", null, null, null, null, null, "uri").use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val record = BatchLocalMatchRecordCodec.decode(
+                        cursor.getString(cursor.getColumnIndexOrThrow("uri")),
+                        cursor.getString(cursor.getColumnIndexOrThrow("local_json")),
+                        cursor.getString(cursor.getColumnIndexOrThrow("result_json")),
+                    )
+                    if (record == null) { damagedRowCount++; continue }
+                    val local = record.local
+                    val result = record.result
+                    val track = LocalTrack(local.mediaStoreId, local.songId, local.title, local.artist,
+                        local.album, local.durationMs, local.sizeBytes, Uri.parse(local.uri), local.path,
+                        local.dateAddedMs, local.source, local.albumArtist, local.year, local.trackNumber)
+                    add(BatchLocalMatchRow(track, result.query, result.status, result.matchedTrack,
+                        result.candidates, result.reason, result.updatedAtMs, result.usesExistingSource))
+                }
             }
         }
     }
@@ -49,8 +59,8 @@ internal class BatchLocalMatchStore(context: Context) : SQLiteOpenHelper(context
     fun writeRow(row: BatchLocalMatchRow) {
         val values = ContentValues().apply {
             put("uri", row.local.uri.toString())
-            put("local_json", json.encodeToString(PersistedLocal.from(row.local)))
-            put("result_json", json.encodeToString(PersistedResult(row.query, row.status, row.matchedTrack,
+            put("local_json", json.encodeToString(row.local.persisted()))
+            put("result_json", json.encodeToString(BatchLocalMatchRecordCodec.Result(row.query, row.status, row.matchedTrack,
                 row.candidates, row.reason, row.updatedAtMs, row.usesExistingSource)))
         }
         check(writableDatabase.insertWithOnConflict("results", null, values, SQLiteDatabase.CONFLICT_REPLACE) >= 0L) {
@@ -78,25 +88,8 @@ internal class BatchLocalMatchStore(context: Context) : SQLiteOpenHelper(context
         }, SQLiteDatabase.CONFLICT_REPLACE) >= 0L) { "无法保存匹配进度" }
     }
 
-    @Serializable private data class PersistedResult(
-        val query: String,
-        val status: BatchLocalMatchStatus,
-        val matchedTrack: Track? = null,
-        val candidates: List<Track> = emptyList(),
-        val reason: String = "",
-        val updatedAtMs: Long = 0L,
-        val usesExistingSource: Boolean = false
+    private fun LocalTrack.persisted() = BatchLocalMatchRecordCodec.Local(
+        mediaStoreId, songId, title, artist, album, durationMs, sizeBytes, uri.toString(), path,
+        dateAddedMs, source, albumArtist, year, trackNumber,
     )
-    @Serializable private data class PersistedLocal(
-        val mediaStoreId: Long, val songId: Long?, val title: String, val artist: String, val album: String?,
-        val durationMs: Long, val sizeBytes: Long, val uri: String, val path: String?, val dateAddedMs: Long,
-        val source: LocalTrackSource, val albumArtist: String?, val year: Int?, val trackNumber: Int?
-    ) {
-        fun toTrack() = LocalTrack(mediaStoreId, songId, title, artist, album, durationMs, sizeBytes, Uri.parse(uri),
-            path, dateAddedMs, source, albumArtist, year, trackNumber)
-        companion object {
-            fun from(t: LocalTrack) = PersistedLocal(t.mediaStoreId, t.songId, t.title, t.artist, t.album,
-                t.durationMs, t.sizeBytes, t.uri.toString(), t.path, t.dateAddedMs, t.source, t.albumArtist, t.year, t.trackNumber)
-        }
-    }
 }
