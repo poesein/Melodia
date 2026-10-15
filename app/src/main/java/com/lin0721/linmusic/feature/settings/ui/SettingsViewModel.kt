@@ -65,6 +65,7 @@ class SettingsViewModel(
     // ─── 本地偏好设置对外状态流 ───
     val searchAggregationEnabled = sourcePreferences.searchAggregationEnabled.asState(false)
     val fallbackEnabled = sourcePreferences.fallbackEnabled.asState(false)
+    val strictFallbackEnabled = sourcePreferences.strictFallbackEnabled.asState(false)
     val communityPriority = sourcePreferences.communityPriority.asState(false)
     val unmServerUrl = sourcePreferences.unmServerUrl.asState("")
     val unmRemoteFallbackEnabled = sourcePreferences.unmRemoteFallbackEnabled.asState(false)
@@ -249,6 +250,7 @@ class SettingsViewModel(
     fun updateSearchAggregationEnabled(enabled: Boolean) = launchSave { sourcePreferences.saveSearchAggregationEnabled(enabled) }
 
     fun updateFallbackEnabled(enabled: Boolean) = launchSave { sourcePreferences.saveFallbackEnabled(enabled) }
+    fun updateStrictFallbackEnabled(enabled: Boolean) = launchSave { sourcePreferences.saveStrictFallbackEnabled(enabled) }
 
     fun updateUnmServerUrl(url: String) = launchSave { sourcePreferences.saveUnmServerUrl(url) }
 

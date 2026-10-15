@@ -6,13 +6,23 @@ import com.lin0721.linmusic.core.player.domain.LyricLine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 
+enum class PlaybackSourceKind {
+    UNKNOWN, OFFICIAL, COMMUNITY, REMOTE_UNM, STRICT_VERIFIED
+}
+
 // 播放直链信息（包含直链地址、是否为 VIP 试听片段、实际音质档位；换源等取不到档位时 level 为空）
 data class SongPlaybackInfo(
     val url: String,
     val isFreeTrial: Boolean = false,
     val level: String? = null,
     // 官方只有试听且换源全部未命中，只能退回播放官方试听片段
-    val trialFallback: Boolean = false
+    val trialFallback: Boolean = false,
+    // 未显式标注的旧缓存/调用方不能因默认值被当作可信官方结果。
+    val sourceKind: PlaybackSourceKind = PlaybackSourceKind.UNKNOWN,
+    val strictVerified: Boolean = false,
+    val cacheIdentity: String? = null,
+    // 网易云 freeTrialInfo.start 的秒数换算为毫秒；缺失/非法时不猜起点。
+    val referenceStartMs: Long? = null
 )
 
 // 播放引擎数据仓储（core 共享能力，服务于 PlayerManager/FloatingLyricService 及多个域的推荐入口）

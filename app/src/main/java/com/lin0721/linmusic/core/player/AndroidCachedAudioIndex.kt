@@ -7,6 +7,7 @@ import com.lin0721.linmusic.core.download.DownloadPreferences
 import com.lin0721.linmusic.core.offline.CachedAudioIndex
 import com.lin0721.linmusic.core.preferences.SettingsPreferences
 import com.lin0721.linmusic.core.localmusic.LocalMusicApi
+import com.lin0721.linmusic.core.source.SourcePreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.combine
@@ -20,10 +21,13 @@ class AndroidCachedAudioIndex(
     private val context: Context,
     private val downloadPreferences: DownloadPreferences,
     private val settingsPreferences: SettingsPreferences,
-    private val localMusicApi: LocalMusicApi
+    private val localMusicApi: LocalMusicApi,
+    private val sourcePreferences: SourcePreferences
 ) : CachedAudioIndex {
 
-    override val changes: Flow<Unit> = combine(localMusicApi.availabilityChanges, downloadPreferences.records) { _, _ -> Unit }
+    override val changes: Flow<Unit> = combine(
+        localMusicApi.availabilityChanges, downloadPreferences.records, sourcePreferences.strictFallbackEnabled
+    ) { _, _, _ -> Unit }
 
     override suspend fun playableIds(ids: Collection<Long>): Set<Long> = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext emptySet()
@@ -32,9 +36,11 @@ class AndroidCachedAudioIndex(
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { /* External-file lookup must not block ordinary downloaded/cache playback. */ }
         val remaining = ids.filterTo(HashSet()) { it !in playable }
-        if (remaining.isNotEmpty()) {
+        if (remaining.isNotEmpty() && StrictPlaybackPolicy.allowsStreamingCache(sourcePreferences.strictFallbackEnabled.first())) {
             val maxSize = settingsPreferences.audioCacheMaxSize.first()
-            playable += AudioCacheManager.findCompleteKeys(context, maxSize, remaining).keys
+            val cached = AudioCacheManager.findCompleteKeys(context, maxSize, remaining).keys
+            // A setting change during disk lookup must not publish unverified cache entries as playable.
+            if (StrictPlaybackPolicy.allowsStreamingCache(sourcePreferences.strictFallbackEnabled.first())) playable += cached
         }
         playable
     }

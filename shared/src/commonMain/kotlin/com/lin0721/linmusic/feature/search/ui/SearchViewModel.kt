@@ -33,6 +33,7 @@ import com.lin0721.linmusic.core.source.PlatformSearchProvider
 import com.lin0721.linmusic.core.source.SourcePreferences
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -512,10 +513,11 @@ class SearchViewModel(
         localUri = playUrl
     )
 
-    // 与换源一致，交给已启用的换源插件按歌曲信息解析
+    // 外部聚合结果缺少可信的网易云参考片段，不能绕过 Router 把裸直链塞进 localUri。
     private suspend fun resolveExternalUrl(track: ExternalTrack): String? {
+        if (sourcePreferences?.strictFallbackEnabled?.first() == true) return null
         for (provider in sourceProviders) {
-            val url = runCatching {
+            val url = try {
                 provider.resolveUrl(
                     songId = track.hash ?: track.id,
                     songName = track.name,
@@ -525,7 +527,12 @@ class SearchViewModel(
                     quality = "lossless",
                     origin = track.platform
                 )?.url
-            }.getOrNull()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (sourcePreferences?.strictFallbackEnabled?.first() == true) return null
             if (!url.isNullOrBlank()) return url
         }
         return null
@@ -533,6 +540,9 @@ class SearchViewModel(
 
     // 区分没配置与配置了但没解析出来，让用户知道该去哪里处理
     private suspend fun explainResolveFailure(track: ExternalTrack): String {
+        if (sourcePreferences?.strictFallbackEnabled?.first() == true) {
+            return "严格模式不能核对聚合搜索的裸直链，请先到网易云搜索对应歌曲，或使用已关联本地音频"
+        }
         if (sourceProviders.isEmpty()) return "当前平台暂无可用换源插件"
         val prefs = sourcePreferences ?: return "无法获取播放直链"
         if (!prefs.lxPluginEnabled.first()) return "未启用社区源插件，请到 设置 › 音源与换源 中开启"

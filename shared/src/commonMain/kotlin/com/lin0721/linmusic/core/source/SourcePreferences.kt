@@ -16,6 +16,7 @@ class SourcePreferences(private val dataStore: DataStore<Preferences>) {
 
     companion object {
         private val KEY_FALLBACK_ENABLED = booleanPreferencesKey("source_fallback_enabled")
+        private val KEY_STRICT_FALLBACK_ENABLED = booleanPreferencesKey("source_strict_fallback_enabled")
         private val KEY_UNM_SERVER_URL = stringPreferencesKey("source_unm_server_url")
         private val KEY_UNM_REMOTE_FALLBACK_ENABLED = booleanPreferencesKey("source_unm_remote_fallback_enabled")
         private val KEY_UNM_AUTO_MATCH = booleanPreferencesKey("source_unm_auto_match")
@@ -53,6 +54,15 @@ class SourcePreferences(private val dataStore: DataStore<Preferences>) {
 
     suspend fun saveFallbackEnabled(enabled: Boolean) {
         dataStore.edit { prefs -> prefs[KEY_FALLBACK_ENABLED] = enabled }
+    }
+
+    // 默认保持旧版行为；启用后候选元数据与实际音频片段必须分别通过核对。
+    val strictFallbackEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_STRICT_FALLBACK_ENABLED] ?: false
+    }
+
+    suspend fun saveStrictFallbackEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[KEY_STRICT_FALLBACK_ENABLED] = enabled }
     }
 
     // UNM 服务端 Base URL（默认不填写）

@@ -22,14 +22,14 @@ import org.koin.dsl.module
 val playerModule = module {
     single { ExternalInterruptionResumeController(androidContext(), get()) }
     single {
-        PlayerManager(androidContext(), get(), get(), get(), get(), get(), get(), get(), get()).also { manager ->
+        PlayerManager(androidContext(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { manager ->
             // 随播放器一同创建，进程内常驻记录播客收听进度
             PodcastProgressTracker(manager, get()).start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
         }
     }
     single<PlaybackController> { get<PlayerManager>() }
     // 离线时的可播放判定：已下载 + 播放缓存已完整
-    single<CachedAudioIndex> { AndroidCachedAudioIndex(androidContext(), get(), get(), get()) }
+    single<CachedAudioIndex> { AndroidCachedAudioIndex(androidContext(), get(), get(), get(), get()) }
     // AMLL 歌词源：TTML 原文按原始 XML 缓存在 cacheDir 下，解析统一由 shared 的 TtmlLyricParser 负责
     single { AmllLyricsClient(LyricsCache(androidContext().cacheDir)) }
     single {

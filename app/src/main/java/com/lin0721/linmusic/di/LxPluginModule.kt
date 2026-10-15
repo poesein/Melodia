@@ -1,6 +1,8 @@
 package com.lin0721.linmusic.di
 
 import com.lin0721.linmusic.core.source.AudioSourceProvider
+import com.lin0721.linmusic.core.source.AndroidStrictAudioVerifier
+import com.lin0721.linmusic.core.source.StrictAudioVerifier
 import com.lin0721.linmusic.core.source.LxAudioSourceProvider
 import com.lin0721.linmusic.core.source.LxPluginRuntime
 import com.lin0721.linmusic.core.source.PlatformSearchProvider
@@ -12,6 +14,7 @@ import org.koin.dsl.module
 
 // LX Music 插件沙盒与音源注入模块
 val lxPluginModule = module {
+    single<StrictAudioVerifier> { AndroidStrictAudioVerifier(androidContext()) }
     single { LxPluginEngine(androidContext()) } bind LxPluginRuntime::class
     single<AudioSourceProvider>(named("lx")) {
         LxAudioSourceProvider(get<LxPluginRuntime>(), get(), getAll<PlatformSearchProvider>())

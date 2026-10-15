@@ -96,6 +96,17 @@ data class FreeTrialInfo(
     val end: Long = 0,
 )
 
+// freeTrialInfo 使用秒；不能把默认/非法区间当作已经知道试听在完整录音中的起点。
+internal fun SongUrlItem.toPlaybackInfo(): SongPlaybackInfo = SongPlaybackInfo(
+    url = url.orEmpty(),
+    isFreeTrial = isTrialAudio,
+    level = level?.takeIf { it.isNotBlank() },
+    sourceKind = PlaybackSourceKind.OFFICIAL,
+    referenceStartMs = freeTrialInfo?.takeIf {
+        it.start >= 0 && it.end > it.start && it.start <= Long.MAX_VALUE / 1000
+    }?.start?.times(1000)
+)
+
 @Serializable
 data class FreeTrialPrivilege(
     val cannotListenReason: Int = 0,

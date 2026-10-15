@@ -50,6 +50,7 @@ fun AudioSourcesSettingsView(viewModel: SettingsViewModel) {
 
     val searchAggregationEnabled by viewModel.searchAggregationEnabled.collectAsStateWithLifecycle()
     val fallbackEnabled by viewModel.fallbackEnabled.collectAsStateWithLifecycle()
+    val strictFallbackEnabled by viewModel.strictFallbackEnabled.collectAsStateWithLifecycle()
     val unmServerUrl by viewModel.unmServerUrl.collectAsStateWithLifecycle()
     val unmRemoteFallbackEnabled by viewModel.unmRemoteFallbackEnabled.collectAsStateWithLifecycle()
     val unmAutoMatch by viewModel.unmAutoMatch.collectAsStateWithLifecycle()
@@ -127,6 +128,13 @@ fun AudioSourcesSettingsView(viewModel: SettingsViewModel) {
                         onCheckedChange = { viewModel.updateCommunityPriority(it) }
                     )
                 }
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                SettingsSwitchRow(
+                    title = "严格换源模式",
+                    subtitle = "默认关闭。换源需通过歌曲与版本筛选，并与官方试听音频片段比对；缺少参考或无法核验则不播放。开启时绕过旧播放缓存并重新取链，本地音乐、已有关联和下载保留。核验会增加等待与流量，片段一致不能保证整曲。",
+                    checked = strictFallbackEnabled,
+                    onCheckedChange = { viewModel.updateStrictFallbackEnabled(it) }
+                )
             }
         }
 

@@ -23,7 +23,9 @@ import com.lin0721.linmusic.core.log.AppLogger
 import com.lin0721.linmusic.core.network.AppError
 import com.lin0721.linmusic.core.network.OnlineStateProvider
 import com.lin0721.linmusic.core.player.data.PlaybackRepository
+import com.lin0721.linmusic.core.player.data.SongPlaybackInfo
 import com.lin0721.linmusic.core.preferences.SettingsPreferences
+import com.lin0721.linmusic.core.source.SourcePreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,8 +57,8 @@ private const val QUEUE_MOVE_SAVE_DEBOUNCE_MS = 400L
 // 播放中自动持久化进度的周期，覆盖直接划掉应用强退场景
 private const val PERIODIC_STATE_SAVE_INTERVAL_MS = 3000L
 
-// 预取到的下一首播放链接，按 songId 校验有效性
-private data class PrefetchedUrl(val songId: Long, val url: String, val level: String? = null)
+// 保留来源证明与策略代际，不能把已核验结果降成不带身份的 URL 再复用。
+private data class PrefetchedPlayback(val songId: Long, val info: SongPlaybackInfo, val token: PlaybackPolicyToken)
 
 // 播放门面：对外暴露播放状态与控制入口，队列、控制器、进度、持久化等职责交由协作者承担
 class PlayerManager(
@@ -68,7 +70,8 @@ class PlayerManager(
     private val localMusicApi: LocalMusicApi,
     private val songDownloadManager: SongDownloadManager,
     private val externalInterruptionResumeController: ExternalInterruptionResumeController,
-    private val onlineState: OnlineStateProvider
+    private val onlineState: OnlineStateProvider,
+    private val sourcePreferences: SourcePreferences
 ) : Player.Listener, PlaybackController {
 
     companion object {
@@ -162,6 +165,11 @@ class PlayerManager(
     }.stateIn(scope, SharingStarted.Eagerly, null)
 
     private var activePlayJob: Job? = null
+    @Volatile private var sourcePolicyEpoch = 0L
+    @Volatile private var strictFallbackEnabled = false
+    private var sourcePolicyInitialized = false
+    private var acceptedNetworkPlayback: PrefetchedPlayback? = null
+    private var clearingForSourcePolicy = false
     private var moveSaveJob: Job? = null
     private var consecutiveErrors = 0
 
@@ -201,7 +209,7 @@ class PlayerManager(
     private var pendingStartOffset: Pair<Long, Long>? = null
 
     private var prefetchJob: Job? = null
-    private var prefetchedNextUrl: PrefetchedUrl? = null
+    private var prefetchedNextUrl: PrefetchedPlayback? = null
     private var prefetchTriggeredForSongId: Long = -1L
 
     private val streamCacheTriggeredSongIds = Collections.synchronizedSet(mutableSetOf<Long>())
@@ -246,6 +254,15 @@ class PlayerManager(
         scope.launch {
             settingsPreferences.crossfadeDurationMs.collect { crossfadeDurationMs = it }
         }
+        scope.launch {
+            sourcePreferences.strictFallbackEnabled.collect { enabled ->
+                if (!sourcePolicyInitialized || enabled != strictFallbackEnabled) {
+                    val needsReset = sourcePolicyInitialized || enabled
+                    sourcePolicyInitialized = true
+                    if (needsReset) onSourcePolicyChanged(enabled) else strictFallbackEnabled = enabled
+                }
+            }
+        }
 
         progress.start(
             isPlaying = { _isPlaying.value },
@@ -277,6 +294,65 @@ class PlayerManager(
         sleepTimer.start(minutes)
     }
 
+    private suspend fun policyToken(): PlaybackPolicyToken =
+        PlaybackPolicyToken(sourcePolicyEpoch, sourcePreferences.strictFallbackEnabled.first())
+
+    private suspend fun isCurrentPolicy(token: PlaybackPolicyToken): Boolean =
+        StrictPlaybackPolicy.isCurrent(token, sourcePolicyEpoch, sourcePreferences.strictFallbackEnabled.first())
+
+    private fun onSourcePolicyChanged(enabled: Boolean) {
+        // Invalidate first: cancelled HTTP/native work may still return after cancellation.
+        sourcePolicyEpoch++
+        sourcePolicyInitialized = true
+        strictFallbackEnabled = enabled
+        val hadPendingRequest = activePlayJob?.isActive == true
+        val intendedPlay = _playWhenReady.value || controllerHolder.playWhenReady
+        val item = playbackQueue.currentItem()
+        val loadedUri = _currentTrack.value?.localConfiguration?.uri?.toString() ?: requestedSource?.second
+        val position = if (_currentTrack.value?.mediaId?.toLongOrNull() == item?.songId) {
+            controllerHolder.currentPositionOrNull ?: progress.currentPosition.value
+        } else pendingStartPosition
+        activePlayJob?.cancel()
+        prefetchJob?.cancel()
+        autoCrossfadeJob?.cancel()
+        networkGuard.cancelRecoveryWait()
+        roaming.cancel()
+        prefetchedNextUrl = null
+        prefetchTriggeredForSongId = -1L
+        streamCacheTriggeredSongIds.clear()
+        autoCrossfadeScheduledSongId = -1L
+        autoCrossfadeTriggeredSongId = -1L
+        pendingAutoFadeMs = 0L
+        pendingStartOffset = null
+        pendingSkipFromIndex = null
+        pendingStartPosition = 0L
+        streamErrorRecoverySongId = null
+        acceptedNetworkPlayback = null
+
+        // Keep actual local files. HTTP in QueueItem.localUri is an external-search link, not a local file.
+        if (!hadPendingRequest && (loadedUri == null || StrictPlaybackPolicy.isLocalFile(loadedUri))) return
+        requestedSource = null
+        clearingForSourcePolicy = true
+        pausedForPendingPlay = true
+        controllerHolder.stopAndClear() // Also clears paused old HTTP/offline-cache MediaItems.
+        _playWhenReady.value = intendedPlay
+        if (item != null) {
+            fetchUrlAndPlay(playbackQueue.currentIndex.value, position, playWhenReady = intendedPlay)
+        }
+    }
+
+    private fun rejectStrictPlayback() {
+        pendingSkipFromIndex = null
+        pendingStartPosition = 0L
+        pausedForPendingPlay = false
+        acceptedNetworkPlayback = null
+        requestedSource = null
+        _playWhenReady.value = false
+        clearPendingTrack(restorePlayWhenReady = false)
+        controllerHolder.stopAndClear()
+        Toast.makeText(context, "严格模式下未取得经过核验的音源，已暂停播放", Toast.LENGTH_SHORT).show()
+    }
+
     override suspend fun initController() {
         if (controllerHolder.isConnected) return
 
@@ -301,6 +377,11 @@ class PlayerManager(
 
             mediaController.repeatMode = if (playbackQueue.playMode.value == PlayMode.SINGLE_LOOP)
                 Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        }
+        // A service may survive UI recreation; its already-loaded HTTP item has no in-memory proof here.
+        if (sourcePreferences.strictFallbackEnabled.first()) {
+            val loadedUri = _currentTrack.value?.localConfiguration?.uri?.toString()
+            if (loadedUri != null && !StrictPlaybackPolicy.isLocalFile(loadedUri)) onSourcePolicyChanged(true)
         }
     }
 
@@ -351,7 +432,7 @@ class PlayerManager(
         playbackQueue.setPlayContext(playContext)
         playbackQueue.setPlaySource(null)
         consecutiveErrors = 0
-        fetchUrlAndPlay(0, startPosition, prefetchedUrl = url)
+        fetchUrlAndPlay(0, startPosition, directUrl = url)
     }
 
     // 批量插播歌曲到“下一首”播放位置
@@ -470,7 +551,30 @@ class PlayerManager(
     override fun resume() {
         _playWhenReady.value = true
         externalInterruptionResumeController.onExplicitUserPlay()
-        controllerHolder.play()
+        scope.launch {
+            val token = policyToken()
+            if (!isCurrentPolicy(token)) return@launch
+            val loaded = _currentTrack.value
+            val uri = loaded?.localConfiguration?.uri?.toString()
+            val loadedId = loaded?.mediaId?.toLongOrNull()
+            val queuedId = playbackQueue.currentItem()?.songId
+            val proof = acceptedNetworkPlayback
+            val safeLoaded = (StrictPlaybackPolicy.isLocalFile(uri) && StrictPlaybackPolicy.matchesCurrentItem(loadedId, queuedId)) ||
+                (proof != null && StrictPlaybackPolicy.canResumeNetwork(
+                    proof.songId, loadedId, queuedId, uri, proof.info, proof.token, token
+                ))
+            if (token.strict && (uri == null || !safeLoaded)) {
+                val index = playbackQueue.currentIndex.value
+                if (playbackQueue.itemAt(index) != null) {
+                    val position = controllerHolder.currentPositionOrNull ?: progress.currentPosition.value
+                    clearingForSourcePolicy = true
+                    controllerHolder.stopAndClear()
+                    fetchUrlAndPlay(index, position)
+                } else rejectStrictPlayback()
+                return@launch
+            }
+            controllerHolder.play()
+        }
     }
 
     override fun seekTo(positionMs: Long) {
@@ -490,7 +594,11 @@ class PlayerManager(
     }
 
     override fun togglePlayPause() {
-        val item = _currentTrack.value ?: return
+        val item = _currentTrack.value
+        if (item == null) {
+            if (!playbackQueue.isEmpty) fetchUrlAndPlay(playbackQueue.currentIndex.value, progress.currentPosition.value)
+            return
+        }
         if (!_isPlaying.value && item.localConfiguration == null) {
             // 重启后队列为空，从恢复的 track 元数据重建 1 项队列
             if (playbackQueue.isEmpty) {
@@ -582,8 +690,8 @@ class PlayerManager(
         index: Int,
         startPosition: Long = 0,
         networkRetryAttempt: Int = 0,
-        prefetchedUrl: String? = null,
-        prefetchedLevel: String? = null,
+        prefetched: PrefetchedPlayback? = null,
+        directUrl: String? = null,
         playWhenReady: Boolean = true,
         autoTransition: Boolean = false,
         skipPreferredLocal: Boolean = false
@@ -602,12 +710,24 @@ class PlayerManager(
         }
 
         activePlayJob = scope.launch {
+            val token = policyToken() // Never trust the false default before DataStore's first emission.
+            if (!isCurrentPolicy(token)) return@launch
             _playbackLevel.value = null
             preferredLocalSource = null
+            val directLocal = directUrl?.takeIf(StrictPlaybackPolicy::isLocalFile)
+            if (token.strict && ((item.localUri != null && !StrictPlaybackPolicy.isLocalFile(item.localUri)) ||
+                    (directUrl != null && directLocal == null))) {
+                rejectStrictPlayback()
+                return@launch
+            }
             // Queue-local files first, then manual / conservative automatic external-file associations.
-            val preferredUri = if (!skipPreferredLocal && item.localUri == null) preferredLocalUri(item) else null
-            val localUri = item.localUri ?: preferredUri
+            val preferredUri = if (!skipPreferredLocal && item.localUri == null && directLocal == null) preferredLocalUri(item) else null
+            val localUri = item.localUri ?: directLocal ?: preferredUri
             if (localUri != null) {
+                if (token.strict && !StrictPlaybackPolicy.isLocalFile(localUri)) {
+                    rejectStrictPlayback()
+                    return@launch
+                }
                 if (preferredUri != null) preferredLocalSource = item.songId to preferredUri
                 playbackQueue.setCurrentIndex(index)
                 saveQueueState()
@@ -616,26 +736,35 @@ class PlayerManager(
                 if (playWhenReady) showPendingTrack(item)
                 val artworkUri = localMusicApi.coverUriFor(android.net.Uri.parse(localUri))?.toString()
                     ?: item.coverUrl
+                if (!isCurrentPolicy(token)) return@launch
                 val mediaItem = item.toMediaItem(localUri, playbackQueue.playContext.value, artworkUri)
+                acceptedNetworkPlayback = null
                 controllerHolder.playItem(mediaItem.withCrossfade(autoTransition, startPosition), playbackQueue.playMode.value, startPosition, playWhenReady)
                 return@launch
             }
 
             // 本地已下载文件优先播放
             val localRecord = downloadPreferences.findVerifiedRecord(item.songId)
+            if (token.strict && localRecord != null && !StrictPlaybackPolicy.isLocalFile(localRecord.mediaStoreUri)) {
+                rejectStrictPlayback()
+                return@launch
+            }
 
             // 离线时只能播已缓存的歌曲，没有缓存的沿当前方向跳到下一首可播放的
             if (localRecord == null && !onlineState.isOnline()) {
                 val cacheKey = findOfflineCacheKey(item.songId)
                 if (cacheKey == null) {
-                    skipUnplayableOffline(index, fromIndex, playWhenReady, autoTransition)
+                    if (token.strict) rejectStrictPlayback()
+                    else skipUnplayableOffline(index, fromIndex, playWhenReady, autoTransition)
                     return@launch
                 }
+                if (!isCurrentPolicy(token)) return@launch
                 playbackQueue.setCurrentIndex(index)
                 saveQueueState()
                 progress.resetTo(startPosition, preserveDuration = startPosition > 0L)
                 if (playWhenReady) showPendingTrack(item)
                 val mediaItem = item.toOfflineCachedMediaItem(cacheKey, playbackQueue.playContext.value)
+                acceptedNetworkPlayback = null
                 controllerHolder.playItem(mediaItem.withCrossfade(autoTransition, startPosition), playbackQueue.playMode.value, startPosition, playWhenReady)
                 return@launch
             }
@@ -659,15 +788,28 @@ class PlayerManager(
             if (localRecord != null) {
                 val artworkUri = localMusicApi.coverUriFor(android.net.Uri.parse(localRecord.mediaStoreUri))?.toString()
                     ?: item.coverUrl
+                if (!isCurrentPolicy(token)) return@launch
                 val mediaItem = item.toMediaItem(localRecord.mediaStoreUri, playbackQueue.playContext.value, artworkUri)
+                acceptedNetworkPlayback = null
                 controllerHolder.playItem(mediaItem.withCrossfade(autoTransition, startPosition), playbackQueue.playMode.value, startPosition, playWhenReady)
                 return@launch
             }
 
             // 命中预取缓存时跳过网络请求，最大限度缩短切歌间隙
-            if (prefetchedUrl != null) {
-                val mediaItem = item.toMediaItem(prefetchedUrl, playbackQueue.playContext.value)
-                publishPlaybackLevel(item.songId, prefetchedLevel)
+            val reusablePrefetch = prefetched?.takeIf {
+                it.songId == item.songId && StrictPlaybackPolicy.isCurrent(it.token, token.epoch, token.strict) &&
+                    StrictPlaybackPolicy.allowsInfo(token.strict, it.info)
+            }
+            val readyInfo = reusablePrefetch?.info ?: directUrl?.let { SongPlaybackInfo(url = it) }
+            if (readyInfo != null) {
+                if (!isCurrentPolicy(token)) return@launch
+                if (!StrictPlaybackPolicy.allowsInfo(token.strict, readyInfo)) {
+                    rejectStrictPlayback()
+                    return@launch
+                }
+                val mediaItem = item.toMediaItem(readyInfo.url, playbackQueue.playContext.value)
+                publishPlaybackLevel(item.songId, readyInfo.level)
+                acceptedNetworkPlayback = PrefetchedPlayback(item.songId, readyInfo, token)
                 pendingSkipFromIndex = null
                 controllerHolder.playItem(mediaItem.withCrossfade(autoTransition, startPosition), playbackQueue.playMode.value, startPosition, playWhenReady)
                 return@launch
@@ -680,7 +822,13 @@ class PlayerManager(
 
             repository.getSongPlaybackInfo(item.songId).collect { result ->
                 result.onSuccess { info ->
+                    if (!isCurrentPolicy(token)) return@onSuccess
+                    if (!StrictPlaybackPolicy.allowsInfo(token.strict, info)) {
+                        rejectStrictPlayback()
+                        return@onSuccess
+                    }
                     val mediaItem = item.toMediaItem(info.url, playbackQueue.playContext.value)
+                    acceptedNetworkPlayback = PrefetchedPlayback(item.songId, info, token)
                     publishPlaybackLevel(item.songId, info.level)
                     pendingSkipFromIndex = null
                     if (info.trialFallback && playWhenReady) {
@@ -688,8 +836,11 @@ class PlayerManager(
                     }
                     controllerHolder.playItem(mediaItem.withCrossfade(autoTransition, startPosition), playbackQueue.playMode.value, startPosition, playWhenReady)
                 }.onFailure { throwable ->
+                    if (!isCurrentPolicy(token)) return@onFailure
                     AppLogger.w(TAG, "获取播放URL失败 songId=${item.songId} index=$index networkRetryAttempt=$networkRetryAttempt", throwable)
-                    if (throwable is AppError.NetworkError) {
+                    if (token.strict) {
+                        rejectStrictPlayback() // No automatic skip/retry loop for strict verification failures.
+                    } else if (throwable is AppError.NetworkError) {
                         handleNetworkFailure(index, startPosition, networkRetryAttempt, playWhenReady, autoTransition)
                     } else {
                         skipToNextOnError(index)
@@ -724,25 +875,33 @@ class PlayerManager(
 
     @OptIn(UnstableApi::class)
     private suspend fun findOfflineCacheKey(songId: Long): String? {
+        if (!StrictPlaybackPolicy.allowsStreamingCache(sourcePreferences.strictFallbackEnabled.first())) return null
         val maxSize = settingsPreferences.audioCacheMaxSize.first()
-        return withContext(Dispatchers.IO) {
+        val key = withContext(Dispatchers.IO) {
             AudioCacheManager.findCompleteKeys(context, maxSize, setOf(songId))[songId]
         }
+        return key.takeIf { StrictPlaybackPolicy.allowsStreamingCache(sourcePreferences.strictFallbackEnabled.first()) }
     }
 
     // 队列中离线可播放的歌曲：本地音频、已下载、播放缓存已完整
     @OptIn(UnstableApi::class)
     private suspend fun offlinePlayableSongIds(): Set<Long> {
         val items = playbackQueue.original
-        val playable = items.filter { it.localUri != null }.mapTo(HashSet()) { it.songId }
+        val strict = sourcePreferences.strictFallbackEnabled.first()
+        val playable = items.filter { it.localUri != null && (!strict || StrictPlaybackPolicy.isLocalFile(it.localUri)) }
+            .mapTo(HashSet()) { it.songId }
         items.filter { it.songId !in playable }.forEach { item ->
-            if (preferredLocalUri(item) != null) playable += item.songId
+            val local = preferredLocalUri(item)
+            if (local != null && (!strict || StrictPlaybackPolicy.isLocalFile(local))) playable += item.songId
         }
         val remaining = items.mapTo(HashSet()) { it.songId } - playable
         playable += downloadPreferences.findVerifiedRecords(remaining).map { it.songId }
-        val maxSize = settingsPreferences.audioCacheMaxSize.first()
-        playable += withContext(Dispatchers.IO) {
-            AudioCacheManager.findCompleteKeys(context, maxSize, remaining - playable).keys
+        if (StrictPlaybackPolicy.allowsStreamingCache(sourcePreferences.strictFallbackEnabled.first())) {
+            val maxSize = settingsPreferences.audioCacheMaxSize.first()
+            val cached = withContext(Dispatchers.IO) {
+                AudioCacheManager.findCompleteKeys(context, maxSize, remaining - playable).keys
+            }
+            if (StrictPlaybackPolicy.allowsStreamingCache(sourcePreferences.strictFallbackEnabled.first())) playable += cached
         }
         return playable
     }
@@ -799,6 +958,7 @@ class PlayerManager(
 
     // 播放进度达标时触发边听边存
     private fun maybeCheckStreamCacheProgress(songId: Long, positionMs: Long, durationMs: Long) {
+        if (strictFallbackEnabled) return
         if (durationMs <= 0L || positionMs * 5 < durationMs * 4) return
         if (streamCacheTriggeredSongIds.contains(songId)) return
         val currentItem = playbackQueue.currentItem() ?: return
@@ -807,10 +967,16 @@ class PlayerManager(
     }
 
     private fun maybeTriggerStreamCache(item: QueueItem) {
+        if (strictFallbackEnabled) return
         if (item.songId <= 0L || item.localUri != null) return
         if (preferredLocalSource?.first == item.songId) return
         if (!streamCacheTriggeredSongIds.add(item.songId)) return
         scope.launch(Dispatchers.IO) {
+            val token = policyToken()
+            if (token.strict) {
+                streamCacheTriggeredSongIds.remove(item.songId)
+                return@launch
+            }
             val enabled = settingsPreferences.streamCacheEnabled.first()
             if (!enabled) {
                 streamCacheTriggeredSongIds.remove(item.songId)
@@ -836,7 +1002,9 @@ class PlayerManager(
                 coverUrl = detail?.al?.picUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl,
                 albumYear = yearFromEpochMillis(detail?.publishTime ?: 0L)
             )
-            songDownloadManager.enqueueStreamCache(trackInfo, quality)
+            // This queues an official download Worker, distinct from Media3's streaming-byte cache.
+            // Leave existing/manual downloads intact, but do not start new automatic work in strict mode.
+            if (isCurrentPolicy(token)) songDownloadManager.enqueueStreamCache(trackInfo, quality)
         }
     }
 
@@ -851,6 +1019,7 @@ class PlayerManager(
 
         prefetchJob?.cancel()
         prefetchJob = scope.launch {
+            val token = policyToken()
             if (preferredLocalUri(nextItem) != null) return@launch
             // 下一首已下载时跳过网络预取
             if (downloadPreferences.findVerifiedRecord(nextItem.songId) != null) return@launch
@@ -858,7 +1027,8 @@ class PlayerManager(
                 result.onSuccess { info ->
                     // 退回试听的结果不缓存，真正切歌时重新取链并提示
                     if (info.trialFallback) return@onSuccess
-                    prefetchedNextUrl = PrefetchedUrl(nextItem.songId, info.url, info.level)
+                    if (!isCurrentPolicy(token) || !StrictPlaybackPolicy.allowsInfo(token.strict, info)) return@onSuccess
+                    prefetchedNextUrl = PrefetchedPlayback(nextItem.songId, info, token)
                 }
             }
         }
@@ -872,7 +1042,7 @@ class PlayerManager(
         val nextItem = playbackQueue.itemAt(nextIndex)
         val cached = prefetchedNextUrl?.takeIf { it.songId == nextItem?.songId }
         prefetchedNextUrl = null
-        fetchUrlAndPlay(nextIndex, prefetchedUrl = cached?.url, prefetchedLevel = cached?.level, autoTransition = true)
+        fetchUrlAndPlay(nextIndex, prefetched = cached, autoTransition = true)
     }
 
     // 临近结尾时分析当前歌的有效结尾与下一首的有效开头，在"有效结尾 - 淡化时长"处精确触发自动切歌；
@@ -884,6 +1054,8 @@ class PlayerManager(
         autoCrossfadeScheduledSongId = songId
         autoCrossfadeJob?.cancel()
         autoCrossfadeJob = scope.launch {
+            val token = policyToken()
+            if (token.strict || !isCurrentPolicy(token)) return@launch
             val analyze = isWifiConnected()
             val sourceUri = requestedSource?.takeIf { it.first == songId }?.second
             // 尾部与下一首开头并行分析
@@ -893,6 +1065,7 @@ class PlayerManager(
             val startDeferred = async { if (analyze) analyzeNextTrackStart() else null }
             val effectiveEndMs = endDeferred.await()?.coerceAtMost(durationMs) ?: durationMs
             val nextStart = startDeferred.await()
+            if (!isCurrentPolicy(token)) return@launch
             val fadeMs = CrossfadePolicy.autoFadeMs(crossfadeDurationMs, effectiveEndMs)
             if (fadeMs <= 0L) return@launch
             val triggerMs = CrossfadePolicy.triggerPositionMs(effectiveEndMs, fadeMs)
@@ -900,7 +1073,7 @@ class PlayerManager(
 
             // 按真实位置分段等待，拖动进度、暂停后自动顺延；越过有效结尾则交给 ENDED 兜底
             while (true) {
-                if (!canAutoCrossfade() || _currentTrack.value?.mediaId?.toLongOrNull() != songId) return@launch
+                if (!canAutoCrossfade() || !isCurrentPolicy(token) || _currentTrack.value?.mediaId?.toLongOrNull() != songId) return@launch
                 val positionMs = controllerHolder.currentPosition
                 if (positionMs >= effectiveEndMs) return@launch
                 if (!_isPlaying.value) {
@@ -920,19 +1093,25 @@ class PlayerManager(
     }
 
     private fun canAutoCrossfade(): Boolean =
-        crossfadeEnabled && playbackQueue.playMode.value != PlayMode.SINGLE_LOOP && playbackQueue.size > 1
+        // Edge analysis opens URLs outside the verified playback pipeline; strict mode does not use it.
+        !strictFallbackEnabled && crossfadeEnabled && playbackQueue.playMode.value != PlayMode.SINGLE_LOOP && playbackQueue.size > 1
 
     private suspend fun analyzeNextTrackStart(): Long? {
+        val token = policyToken()
+        if (token.strict) return null
         val nextItem = playbackQueue.nextItemByMode() ?: return null
         val uri = nextItem.localUri
             ?: preferredLocalUri(nextItem)
             ?: downloadPreferences.findVerifiedRecord(nextItem.songId)?.mediaStoreUri
             ?: run {
                 prefetchJob?.join()
-                prefetchedNextUrl?.takeIf { it.songId == nextItem.songId }?.url
+                prefetchedNextUrl?.takeIf {
+                    it.songId == nextItem.songId && StrictPlaybackPolicy.isCurrent(it.token, token.epoch, token.strict)
+                }?.info?.url
             }
             ?: return null
         val startMs = edgeAnalyzer.effectiveStartMs("${nextItem.songId}:$uri", uri) ?: return null
+        if (!isCurrentPolicy(token)) return null
         pendingStartOffset = nextItem.songId to startMs
         return startMs
     }
@@ -943,7 +1122,7 @@ class PlayerManager(
         if (songId != null && uri != null) requestedSource = songId to uri
         val fadeMs = CrossfadePolicy.fadeMsFor(
             autoTransition = autoTransition,
-            enabled = crossfadeEnabled,
+            enabled = crossfadeEnabled && !strictFallbackEnabled,
             isPlaying = _isPlaying.value,
             startPositionMs = startPosition,
             autoFadeMs = pendingAutoFadeMs
@@ -961,10 +1140,12 @@ class PlayerManager(
 
     // 网络类失败原地重试同一首（退避延迟），重试耗尽后不放弃，转为等待网络恢复自动续播
     private fun handleNetworkFailure(index: Int, startPosition: Long, attempt: Int, playWhenReady: Boolean, autoTransition: Boolean) {
+        val epoch = sourcePolicyEpoch
         if (attempt < NETWORK_RETRY_DELAYS_MS.size) {
             val delayMs = NETWORK_RETRY_DELAYS_MS[attempt]
             activePlayJob = scope.launch {
                 delay(delayMs)
+                if (epoch != sourcePolicyEpoch) return@launch
                 fetchUrlAndPlay(index, startPosition, attempt + 1, playWhenReady = playWhenReady, autoTransition = autoTransition)
             }
             return
@@ -973,7 +1154,7 @@ class PlayerManager(
         val songId = playbackQueue.itemAt(index)?.songId
         AppLogger.e(TAG, "网络异常重试 $attempt 次后仍失败，等待网络恢复后自动续播 songId=$songId index=$index")
         networkGuard.awaitNetworkRecovery {
-            fetchUrlAndPlay(index, startPosition, playWhenReady = playWhenReady)
+            if (epoch == sourcePolicyEpoch) fetchUrlAndPlay(index, startPosition, playWhenReady = playWhenReady)
         }
     }
 
@@ -1158,7 +1339,10 @@ class PlayerManager(
         }
         if (pendingStartOffset?.first != newSongId) pendingStartOffset = null
         setCurrentTrack(mediaItem)
-        playbackQueue.setPlayContext(mediaItem?.mediaMetadata?.extras?.getString("playContext"))
+        if (mediaItem != null || !clearingForSourcePolicy) {
+            playbackQueue.setPlayContext(mediaItem?.mediaMetadata?.extras?.getString("playContext"))
+        }
+        if (mediaItem != null) clearingForSourcePolicy = false
         if (mediaItem != null) {
             reportStartPlay(mediaItem)
             // 切歌过渡时：若存在断点续播位置则恢复断点，否则重置为 0
@@ -1201,11 +1385,15 @@ class PlayerManager(
         super.onPlayerError(error)
         AppLogger.e(TAG, "播放器报错 errorCode=${error.errorCodeName} songId=${_currentTrack.value?.mediaId}", error)
         if (tryRecoverPreferredLocalError()) return
-        if (tryRecoverStreamError(error)) return
         scope.launch {
+            if (sourcePreferences.strictFallbackEnabled.first()) {
+                rejectStrictPlayback()
+                return@launch
+            }
+            if (tryRecoverStreamError(error)) return@launch
             Toast.makeText(context, "当前歌曲无法播放，已自动跳过", Toast.LENGTH_SHORT).show()
+            skipToNextOnError(playbackQueue.currentIndex.value)
         }
-        skipToNextOnError(playbackQueue.currentIndex.value)
     }
 
     private fun tryRecoverPreferredLocalError(): Boolean {

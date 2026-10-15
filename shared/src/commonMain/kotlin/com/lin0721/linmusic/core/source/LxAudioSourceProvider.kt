@@ -1,6 +1,7 @@
 package com.lin0721.linmusic.core.source
 
 import com.lin0721.linmusic.core.log.AppLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 
 private const val TAG = "LxAudioSourceProvider"
@@ -26,6 +27,7 @@ class LxAudioSourceProvider(
     ): SourceResult? {
         val enabled = sourcePreferences.lxPluginEnabled.first()
         if (!enabled) return null
+        val strict = sourcePreferences.strictFallbackEnabled.first()
 
         val plugins = sourcePreferences.lxPlugins.first().filter { it.isEnabled }
         if (plugins.isEmpty()) return null
@@ -35,17 +37,24 @@ class LxAudioSourceProvider(
 
         val originKey = origin.lxKey
         // 同一首歌在各平台的匹配结果，多个插件之间复用，null 表示没匹配上
-        val matched = mutableMapOf<String, String?>()
+        val matched = mutableMapOf<String, ExternalTrack?>()
 
         // 按照用户调整的插件优先级顺序逐个尝试
         for (plugin in plugins) {
             val supported = runtime.getSupportedSources(plugin.id).ifEmpty { plugin.sources }
             for (source in candidateSources(originKey, supported)) {
-                val sourceSongId = if (source == originKey && songId.isNotBlank()) {
-                    songId
+                val candidate = if (source == originKey && songId.isNotBlank()) {
+                    ExternalTrack(
+                        id = songId, name = songName, artists = artists,
+                        albumName = albumName.orEmpty(), durationMs = durationMs, platform = origin,
+                        hash = songId.takeIf { origin == MusicPlatform.KUGOU }
+                    )
                 } else {
-                    matched.getOrPut(source) { matchSongId(source, songName, artists, albumName, durationMs) }
+                    matched.getOrPut(source) { matchSong(source, songName, artists, albumName, durationMs, strict) }
                 } ?: continue
+                if (strict && !StrictSourceCandidatePolicy.matches(candidate, songName,
+                        artists.split(ARTIST_SEPARATORS), albumName, durationMs)) continue
+                val sourceSongId = candidate.hash?.takeIf { it.isNotBlank() } ?: candidate.id
 
                 try {
                     val url = runtime.resolveMusicUrl(
@@ -61,13 +70,20 @@ class LxAudioSourceProvider(
                     if (!url.isNullOrBlank() && isTrialPlayUrl(url)) {
                         AppLogger.w(TAG, "插件 [${plugin.name}] 通过 [$source] 返回的是试听链接，继续尝试下一个: $songName")
                     } else if (!url.isNullOrBlank()) {
+                        if (sourcePreferences.strictFallbackEnabled.first() != strict) return null
                         AppLogger.i(TAG, "插件 [${plugin.name}] 成功通过 [$source] 解析直链: $songName")
                         return SourceResult(
                             url = url,
                             platform = platform,
-                            quality = quality
+                            quality = quality,
+                            pluginId = plugin.id,
+                            resolvedPlatform = MusicPlatform.fromLxKey(source),
+                            resolvedSongId = sourceSongId,
+                            candidate = candidate
                         )
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     AppLogger.w(TAG, "插件 [${plugin.name}] 解析平台 [$source] 失败: ${e.message}")
                 }
@@ -84,21 +100,30 @@ class LxAudioSourceProvider(
     }
 
     // 在目标平台搜索并按歌名、歌手、时长匹配，没有把握时返回 null，宁可不播也不播错歌
-    private suspend fun matchSongId(
+    private suspend fun matchSong(
         source: String,
         songName: String,
         artists: String,
         albumName: String?,
-        durationMs: Long
-    ): String? {
+        durationMs: Long,
+        strict: Boolean
+    ): ExternalTrack? {
         val provider = searchProviders.firstOrNull { it.platform.lxKey == source } ?: return null
         val candidates = try {
             provider.search("$songName $artists".trim(), 0, MATCH_SEARCH_LIMIT)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             AppLogger.w(TAG, "[$source] 搜索匹配失败: ${e.message}")
             return null
         }
-        val best = SongMatcher.pickBestCandidate(
+        val best = if (strict) StrictSourceCandidatePolicy.pickBestCandidate(
+            candidates = candidates.filter { it.platform == provider.platform },
+            targetName = songName,
+            targetArtists = artists.split(ARTIST_SEPARATORS).map { it.trim() }.filter { it.isNotEmpty() },
+            targetAlbum = albumName,
+            targetDurationMs = durationMs
+        ) else SongMatcher.pickBestCandidate(
             candidates = candidates,
             targetName = songName,
             targetArtists = artists.split(ARTIST_SEPARATORS).map { it.trim() }.filter { it.isNotEmpty() },
@@ -106,7 +131,7 @@ class LxAudioSourceProvider(
             targetDurationMs = durationMs
         )
         if (best == null) AppLogger.d(TAG, "[$source] 未匹配到同一首歌: $songName - $artists")
-        return best?.let { it.hash ?: it.id }
+        return best
     }
 
     override suspend fun search(keyword: String, offset: Int, limit: Int): List<ExternalTrack> {

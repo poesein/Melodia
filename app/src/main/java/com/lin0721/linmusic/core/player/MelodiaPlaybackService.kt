@@ -14,6 +14,7 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -40,6 +41,7 @@ import com.lin0721.linmusic.core.player.external.EXTRA_LYRIC_INFO
 import com.lin0721.linmusic.core.player.external.ExternalLyricCoordinator
 import com.lin0721.linmusic.core.preferences.SettingsPreferences
 import com.lin0721.linmusic.core.songlike.SongLikeRepository
+import com.lin0721.linmusic.core.source.SourcePreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -59,6 +61,7 @@ class MelodiaPlaybackService : MediaSessionService() {
 
     private val playerManager: PlayerManager by inject()
     private val settingsPreferences: SettingsPreferences by inject()
+    private val sourcePreferences: SourcePreferences by inject()
     private val userPreferences: UserPreferences by inject()
     private val songLikeRepository: SongLikeRepository by inject()
     private val externalLyricCoordinator: ExternalLyricCoordinator by inject()
@@ -145,7 +148,9 @@ class MelodiaPlaybackService : MediaSessionService() {
         // 动态代理数据源，每次请求新数据源时获取最新配置并创建对应的源
         val dynamicDataSourceFactory = androidx.media3.datasource.DataSource.Factory {
             val isCacheEnabled = runBlocking {
-                settingsPreferences.streamCacheEnabled.first()
+                // Media3's old cache has no source proof. Strict mode bypasses both cache reads and writes.
+                StrictPlaybackPolicy.allowsStreamingCache(sourcePreferences.strictFallbackEnabled.first()) &&
+                    settingsPreferences.streamCacheEnabled.first()
             }
             if (isCacheEnabled) {
                 val maxSize = runBlocking {
@@ -192,7 +197,22 @@ class MelodiaPlaybackService : MediaSessionService() {
             }
         }
 
-        player = sessionPlayer
+        // External controllers must not resume an old HTTP item directly while Manager is verifying a replacement.
+        // Intercept the actual boolean operation here; the session callback's PLAY_PAUSE command lacks that boolean.
+        val guardedSessionPlayer = object : ForwardingPlayer(sessionPlayer) {
+            override fun play() {
+                if (!routeTransportRequest(true)) super.play()
+            }
+
+            override fun pause() {
+                if (!routeTransportRequest(false)) super.pause()
+            }
+
+            override fun setPlayWhenReady(playWhenReady: Boolean) {
+                if (!routeTransportRequest(playWhenReady)) super.setPlayWhenReady(playWhenReady)
+            }
+        }
+        player = guardedSessionPlayer
 
         // 点击通知时跳转回应用；REORDER_TO_FRONT 避免每次新建 Activity 实例导致重新加载
         val sessionActivityIntent = Intent(this, MainActivity::class.java).apply {
@@ -206,10 +226,14 @@ class MelodiaPlaybackService : MediaSessionService() {
         )
         sessionActivityPendingIntent = pendingIntent
 
-        mediaSession = MediaSession.Builder(this, sessionPlayer)
+        mediaSession = MediaSession.Builder(this, guardedSessionPlayer)
             .setCallback(CustomSessionCallback())
             .setSessionActivity(pendingIntent)
             .build()
+        serviceScope.launch {
+            // Remove old command grants when strict mode changes; the request callback also checks live settings.
+            sourcePreferences.strictFallbackEnabled.collect { updateMediaSessionButtons() }
+        }
 
         externalLyricCoordinator.onMetadataChanged = {
             sessionPlayer.notifyMetadataChanged()
@@ -219,7 +243,6 @@ class MelodiaPlaybackService : MediaSessionService() {
             scope = serviceScope,
             onResumeRequested = {
                 playerManager.resume()
-                sessionPlayer.play()
             }
         )
 
@@ -350,6 +373,29 @@ class MelodiaPlaybackService : MediaSessionService() {
     }
 
     @OptIn(UnstableApi::class)
+    private fun routeTransportRequest(playWhenReady: Boolean): Boolean {
+        val session = mediaSession ?: return false
+        val controller = session.controllerForCurrentRequest ?: return false
+        if (!StrictPlaybackPolicy.routeTransportThroughManager(
+                controller.packageName, packageName, session.isMediaNotificationController(controller)
+            )) return false
+        if (playWhenReady) playerManager.resume() else playerManager.pause()
+        return true
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun availablePlayerCommands(controller: MediaSession.ControllerInfo): Player.Commands {
+        val commands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
+        val strict = runBlocking { sourcePreferences.strictFallbackEnabled.first() }
+        if (StrictPlaybackPolicy.canSetMediaItems(controller.packageName, packageName, strict)) return commands
+        return commands.buildUpon()
+            .remove(Player.COMMAND_SET_MEDIA_ITEM)
+            .remove(Player.COMMAND_CHANGE_MEDIA_ITEMS)
+            .remove(Player.COMMAND_SET_MEDIA_ITEMS_METADATA)
+            .build()
+    }
+
+    @OptIn(UnstableApi::class)
     private fun updateMediaSessionButtons() {
         val session = mediaSession ?: return
         val customLayout = buildCustomLayout()
@@ -362,7 +408,7 @@ class MelodiaPlaybackService : MediaSessionService() {
             session.setAvailableCommands(
                 controller,
                 sessionCommands,
-                MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                availablePlayerCommands(controller)
             )
         }
     }
@@ -376,7 +422,7 @@ class MelodiaPlaybackService : MediaSessionService() {
         ): MediaSession.ConnectionResult {
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(buildAvailableSessionCommands())
-                .setAvailablePlayerCommands(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
+                .setAvailablePlayerCommands(availablePlayerCommands(controller))
                 .setCustomLayout(buildCustomLayout())
                 .setMediaButtonPreferences(buildMediaButtonPreferences())
                 .setSessionActivity(sessionActivityPendingIntent)
@@ -393,6 +439,12 @@ class MelodiaPlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo,
             playerCommand: Int
         ): Int {
+            if (playerCommand in setOf(Player.COMMAND_SET_MEDIA_ITEM, Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_SET_MEDIA_ITEMS_METADATA)) {
+                val strict = runBlocking { sourcePreferences.strictFallbackEnabled.first() }
+                if (!StrictPlaybackPolicy.canSetMediaItems(controller.packageName, packageName, strict)) {
+                    return SessionResult.RESULT_ERROR_PERMISSION_DENIED
+                }
+            }
             when (playerCommand) {
                 Player.COMMAND_SEEK_TO_NEXT,
                 Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {

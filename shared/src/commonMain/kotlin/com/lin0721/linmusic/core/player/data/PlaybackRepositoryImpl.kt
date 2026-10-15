@@ -53,12 +53,7 @@ class PlaybackRepositoryImpl(
         isSuccess = { it.isSuccess && !it.data.firstOrNull()?.url.isNullOrBlank() },
         code = { it.code },
         transform = { response ->
-            val item = response.data.first()
-            SongPlaybackInfo(
-                url = item.url.orEmpty(),
-                isFreeTrial = item.isTrialAudio,
-                level = item.level?.takeIf { it.isNotBlank() }
-            )
+            response.data.first().toPlaybackInfo()
         }
     )
 
