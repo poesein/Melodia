@@ -131,7 +131,7 @@ fun ArtistCatalogSheet(
 fun ArtistCatalogStatus(state: ArtistCatalogUiState, selection: ArtistCatalogSelection?) {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         state.artistName?.takeIf(String::isNotBlank)?.let {
-            Text("资料库歌手：$it", style = MaterialTheme.typography.bodyMedium)
+            Text("资料库歌手：$it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
         }
         if (selection != null) {
             Text("当前已加载网易云专辑：匹配 ${selection.matchedCount} · 未识别 ${selection.unmatchedCount} · 合并 ${selection.duplicateCount} · 排除 ${selection.excludedCount}",
