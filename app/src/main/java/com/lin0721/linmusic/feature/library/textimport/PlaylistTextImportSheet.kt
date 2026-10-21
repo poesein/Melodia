@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -15,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +47,12 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
     val saving by rememberUpdatedState(state.saving)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { !saving })
+    val listState = rememberLazyListState()
+    val scrollBoundary = remember(sheetState, listState) {
+        PlaylistTextImportScrollBoundary(
+            isExpanded = { sheetState.currentValue == SheetValue.Expanded && sheetState.targetValue == SheetValue.Expanded },
+            canScrollForward = { listState.canScrollForward })
+    }
 
     LaunchedEffect(viewModel) { viewModel.reset() }
     DisposableEffect(viewModel) { onDispose { viewModel.reset() } }
@@ -132,7 +140,8 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(vertical = 8.dp)) }
             val visible = if (onlyUnresolved) state.rows.filter { it.status in unresolvedStatuses } else state.rows
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scrollBoundary), state = listState,
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (state.rows.isEmpty()) item {
                     Text("选择 TXT 文件，或直接粘贴文本，例如：\nMap of the Problematique - Muse\nMuse - Starlight\n周杰伦-晴天\n\n两种顺序可混用，分隔横线两侧可不加空格。最多 500 行。\n文件支持 UTF-8、UTF-16（带 BOM）和 GB18030。\n只自动选择歌名、歌手一致且顺序无歧义的结果；其他结果由你确认。",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
