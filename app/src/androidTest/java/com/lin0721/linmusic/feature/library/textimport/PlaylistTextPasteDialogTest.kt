@@ -12,6 +12,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import com.lin0721.linmusic.core.userplaylist.UserPlaylist
 import org.junit.Rule
 import org.junit.Test
 
@@ -43,5 +45,22 @@ class PlaylistTextPasteDialogTest {
         }
         compose.onNodeWithText("取消").performClick()
         compose.runOnIdle { assertEquals(true, dismissed); assertFalse(submitted) }
+    }
+
+    @Test fun destinationDialogOffersExistingPlaylistAndNewWithNaming() {
+        val existing = UserPlaylist(id = 50, name = "已有歌单", trackCount = 12, userId = 1)
+        var selected: UserPlaylist? = null
+        var choseNew = false
+        compose.setContent {
+            MaterialTheme {
+                PlaylistTextTargetDialog(listOf(existing), false, null, {}, {}, {
+                    selected = it; choseNew = it == null
+                })
+            }
+        }
+        compose.onNodeWithText("已有歌单").performClick()
+        compose.runOnIdle { assertEquals(50L, selected?.id); assertFalse(choseNew) }
+        compose.onNodeWithText("新建歌单并命名").performClick()
+        compose.runOnIdle { assertNull(selected); assertEquals(true, choseNew) }
     }
 }

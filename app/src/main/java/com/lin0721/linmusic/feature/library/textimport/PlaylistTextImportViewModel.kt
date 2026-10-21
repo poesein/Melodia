@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lin0721.linmusic.core.auth.UserPreferences
 import com.lin0721.linmusic.core.model.Track
+import com.lin0721.linmusic.core.userplaylist.UserPlaylist
+import com.lin0721.linmusic.core.userplaylist.UserPlaylistRepository
 import com.lin0721.linmusic.core.playlistmutation.PlaylistMutationBus
 import com.lin0721.linmusic.core.playlistmutation.PlaylistMutationEvent
 import com.lin0721.linmusic.feature.create.data.CreateRepository
@@ -41,14 +43,19 @@ data class PlaylistTextImportState(
     val matching: Boolean = false,
     val saving: Boolean = false,
     val error: String? = null,
-    val createdPlaylistId: Long? = null,
+    val activePlaylistId: Long? = null,
+    val targetPlaylist: UserPlaylist? = null,
+    val targetPlaylists: List<UserPlaylist> = emptyList(),
+    val loadingTargets: Boolean = false,
+    val targetError: String? = null,
     val finishedPlaylistId: Long? = null
 ) {
-    val selectionLocked get() = saving || createdPlaylistId != null
+    val selectionLocked get() = saving || activePlaylistId != null
     val selectedCount get() = PlaylistTextDocument.selectedIds(rows).size
 }
 
 private class ImportAccountChanged : IllegalStateException()
+private class ImportTargetUnavailable : IllegalStateException()
 
 /** Import orchestration stays outside LibraryViewModel and reuses the normal search/write APIs. */
 class PlaylistTextImportViewModel(
@@ -57,17 +64,20 @@ class PlaylistTextImportViewModel(
     private val playlistRepository: PlaylistRepository,
     private val userPreferences: UserPreferences,
     private val playlistMutationBus: PlaylistMutationBus,
-    private val playlistApi: PlaylistApi
+    private val playlistApi: PlaylistApi,
+    private val userPlaylistRepository: UserPlaylistRepository
 ) : ViewModel() {
     private val _state = MutableStateFlow(PlaylistTextImportState())
     val state = _state.asStateFlow()
     private var matchJob: Job? = null
+    private var targetJob: Job? = null
     private var writer = PlaylistTextWriter()
     private var accountId: Long? = null
 
     fun reset() {
         if (_state.value.saving) return
         matchJob?.cancel()
+        targetJob?.cancel()
         writer = PlaylistTextWriter()
         accountId = null
         _state.value = PlaylistTextImportState()
@@ -82,6 +92,34 @@ class PlaylistTextImportViewModel(
     }
     fun setPrivate(value: Boolean) {
         if (!_state.value.selectionLocked) _state.update { it.copy(isPrivate = value) }
+    }
+
+    fun setTarget(playlist: UserPlaylist?) {
+        if (_state.value.selectionLocked) return
+        val selected = if (playlist == null) null else _state.value.targetPlaylists.firstOrNull { it.id == playlist.id } ?: return
+        _state.update { it.copy(targetPlaylist = selected) }
+    }
+
+    fun loadTargets() {
+        if (_state.value.selectionLocked || _state.value.loadingTargets) return
+        _state.update { it.copy(loadingTargets = true, targetError = null) }
+        targetJob = viewModelScope.launch {
+            try {
+                requireSameAccount()
+                val uid = checkNotNull(accountId)
+                val playlists = withTimeout(15_000) { userPlaylistRepository.getUserPlaylists(uid).first().getOrThrow() }
+                requireSameAccount()
+                _state.update { it.copy(targetPlaylists = playlists.filter { playlist ->
+                    playlist.id > 0 && (playlist.creator?.userId?.takeIf { id -> id > 0 } ?: playlist.userId) == uid
+                }.distinctBy { playlist -> playlist.id }) }
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                _state.update { it.copy(targetError = "读取歌单超时，请重试") }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                _state.update { it.copy(targetError = if (error is ImportAccountChanged) "登录账户已改变，请重新导入"
+                    else "无法读取歌单，请检查网络后重试") }
+            } finally { _state.update { it.copy(loadingTargets = false) } }
+        }
     }
 
     fun loadDocument(bytes: ByteArray, fileName: String) = loadContent(fileName,
@@ -167,21 +205,33 @@ class PlaylistTextImportViewModel(
         try {
             val permits = Semaphore(2)
             coroutineScope {
-                rows.map { row -> async { permits.withPermit { matchRow(row, "${row.title} ${row.artist}") } } }.awaitAll()
+                rows.map { row -> async { permits.withPermit {
+                    matchRow(row, "${row.title} ${row.artist}", "${row.artist} ${row.title}")
+                } } }.awaitAll()
             }
         } finally { _state.update { it.copy(matching = false) } }
     }
 
-    private suspend fun matchRow(row: TextPlaylistRow, query: String) {
+    private suspend fun matchRow(row: TextPlaylistRow, query: String, alternateQuery: String? = null) {
+        var preview: TextPlaylistRow? = null
         val resolved = try {
-            val results = withTimeout(15_000) {
-                searchRepository.search(query, SearchType.SONG, limit = 30).first().getOrThrow()
+            withTimeout(15_000) {
+                suspend fun search(keywords: String): List<Track> = searchRepository
+                    .search(keywords, SearchType.SONG, limit = 30).first().getOrThrow()
+                    .items.filterIsInstance<SearchResultItem.SongItem>().map { it.track }
+                val results = search(query)
+                val first = PlaylistTextDocument.resolve(row, results)
+                preview = first
+                // The service may rank an artist's other songs above the requested title when
+                // artist comes first. Retry the opposite order only for unresolved automatic rows.
+                // Both calls share the original timeout/concurrency limits; manual queries stay literal.
+                if (first.selected != null || alternateQuery.isNullOrBlank() || alternateQuery == query) first
+                else PlaylistTextDocument.resolve(row, results + search(alternateQuery))
             }
-            PlaylistTextDocument.resolve(row, results.items.filterIsInstance<SearchResultItem.SongItem>().map { it.track })
         } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-            row.copy(status = TextPlaylistStatus.ERROR, selected = null, message = "搜索超时，可重试")
+            (preview ?: row).copy(status = TextPlaylistStatus.ERROR, selected = null, message = "搜索超时，可重试")
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { row.copy(status = TextPlaylistStatus.ERROR, selected = null, message = "搜索失败，请检查网络后重试") }
+        catch (_: Exception) { (preview ?: row).copy(status = TextPlaylistStatus.ERROR, selected = null, message = "搜索失败，请检查网络后重试") }
         currentCoroutineContext().ensureActive()
         updateRow(row.line) { resolved.copy(included = it.included) }
     }
@@ -195,7 +245,7 @@ class PlaylistTextImportViewModel(
         val snapshot = _state.value
         if (snapshot.saving || snapshot.matching || snapshot.loading || snapshot.finishedPlaylistId != null) return
         val ids = PlaylistTextDocument.selectedIds(snapshot.rows)
-        if (ids.isEmpty() || snapshot.name.isBlank()) {
+        if (ids.isEmpty() || snapshot.targetPlaylist == null && snapshot.name.isBlank()) {
             _state.update { it.copy(error = "请填写歌单名称，并至少选择一首匹配歌曲") }; return
         }
         _state.update { it.copy(saving = true, error = null) }
@@ -207,7 +257,7 @@ class PlaylistTextImportViewModel(
                         requireSameAccount()
                         val created = createRepository.createPlaylist(snapshot.name.trim(), playlistPrivacyOf(snapshot.isPrivate)).first().getOrThrow().id
                         if (created > 0) {
-                            _state.update { it.copy(createdPlaylistId = created) }
+                            _state.update { it.copy(activePlaylistId = created) }
                             playlistMutationBus.emit(PlaylistMutationEvent.Created(created))
                         }
                         created
@@ -223,20 +273,22 @@ class PlaylistTextImportViewModel(
                         val response = withTimeout(15_000) { playlistApi.getPlaylistDetail(PlaylistDetailRequest(id)) }
                         val detail = response.playlist?.takeIf { response.isSuccess && it.id == id }
                             ?: error("无法从服务器核对歌单")
+                        if (snapshot.targetPlaylist != null && detail.creator?.userId != accountId) throw ImportTargetUnavailable()
                         (detail.trackIds.map { it.id } + detail.tracks.map { it.id }).toSet()
-                    })
-                playlistMutationBus.emit(PlaylistMutationEvent.Created(id))
+                    }, existingPlaylistId = snapshot.targetPlaylist?.id)
+                if (snapshot.targetPlaylist == null) playlistMutationBus.emit(PlaylistMutationEvent.Created(id))
                 _state.update { it.copy(finishedPlaylistId = id) }
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 _state.update { it.copy(error = "核对服务器歌单超时，请检查网络后继续添加。") }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 _state.update { it.copy(error = if (error is ImportAccountChanged) "登录账户已改变，请关闭面板并重新导入"
+                    else if (error is ImportTargetUnavailable) "目标歌单已不可用或不属于当前账户，请关闭面板后重新选择"
                     else if (writer.playlistId != null)
-                    "歌单已创建，添加歌曲未完成。重试会核对已有歌曲并继续添加，不会另建歌单。"
+                    "添加歌曲未完成。重试会核对目标歌单并继续添加，不会另建歌单。"
                     else "未能确认创建结果，请先检查登录状态和音乐库，再决定是否重试。") }
             } finally {
-                _state.update { it.copy(saving = false, createdPlaylistId = writer.playlistId ?: it.createdPlaylistId) }
+                _state.update { it.copy(saving = false, activePlaylistId = writer.playlistId ?: it.activePlaylistId) }
             }
         }
     }

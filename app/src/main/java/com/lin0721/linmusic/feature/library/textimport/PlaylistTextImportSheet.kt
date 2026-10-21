@@ -41,6 +41,7 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
     var onlyUnresolved by remember { mutableStateOf(false) }
     var showPasteDialog by remember { mutableStateOf(false) }
     var pastedText by remember { mutableStateOf("") }
+    var showTargetDialog by remember { mutableStateOf(false) }
     val saving by rememberUpdatedState(state.saving)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { !saving })
@@ -146,15 +147,23 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
                 if (onlyUnresolved && visible.isEmpty()) item { Text("没有待处理项", modifier = Modifier.padding(20.dp)) }
             }
             if (state.rows.isNotEmpty()) {
-                OutlinedTextField(value = state.name, onValueChange = viewModel::setName, label = { Text("歌单名称") },
-                    enabled = !state.selectionLocked, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("私密歌单", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = state.isPrivate, onCheckedChange = viewModel::setPrivate, enabled = !state.selectionLocked)
+                OutlinedButton(onClick = { showTargetDialog = true; viewModel.loadTargets() },
+                    enabled = !state.selectionLocked, modifier = Modifier.fillMaxWidth()) {
+                    Text("导入到：${state.targetPlaylist?.name ?: "新建歌单"}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (state.targetPlaylist == null) {
+                    OutlinedTextField(value = state.name, onValueChange = viewModel::setName, label = { Text("新歌单名称") },
+                        enabled = !state.selectionLocked, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("私密歌单", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Switch(checked = state.isPrivate, onCheckedChange = viewModel::setPrivate, enabled = !state.selectionLocked)
+                    }
                 }
                 Button(onClick = viewModel::save, modifier = Modifier.fillMaxWidth(),
-                    enabled = !reading && !state.loading && !state.matching && !state.saving && state.selectedCount > 0 && state.name.isNotBlank()) {
-                    Text(if (state.createdPlaylistId == null) "导入 ${state.selectedCount} 首到网易云" else "继续添加到已创建歌单")
+                    enabled = !reading && !state.loading && !state.matching && !state.saving && state.selectedCount > 0 &&
+                        (state.targetPlaylist != null || state.name.isNotBlank())) {
+                    Text(if (state.activePlaylistId != null) "继续添加到目标歌单" else if (state.targetPlaylist != null)
+                        "添加 ${state.selectedCount} 首到所选歌单" else "新建歌单并导入 ${state.selectedCount} 首")
                 }
                 Text("仅导入勾选歌曲，重复歌曲只保留一次；未选中的条目会跳过。",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -170,6 +179,41 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
                 viewModel.loadText(pastedText)
             })
     }
+    if (showTargetDialog) {
+        PlaylistTextTargetDialog(state.targetPlaylists, state.loadingTargets, state.targetError,
+            onRefresh = viewModel::loadTargets, onDismiss = { showTargetDialog = false },
+            onSelect = { viewModel.setTarget(it); showTargetDialog = false })
+    }
+}
+
+@Composable
+internal fun PlaylistTextTargetDialog(playlists: List<com.lin0721.linmusic.core.userplaylist.UserPlaylist>,
+    loading: Boolean, error: String?, onRefresh: () -> Unit, onDismiss: () -> Unit,
+    onSelect: (com.lin0721.linmusic.core.userplaylist.UserPlaylist?) -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("选择导入歌单") }, text = {
+        Column {
+            TextButton(onClick = { onSelect(null) }) { Text("新建歌单并命名") }
+            Text("或添加到已有歌单（已有歌曲会跳过）", style = MaterialTheme.typography.bodySmall)
+            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+                items(playlists, key = { it.id }) { playlist ->
+                    Row(Modifier.fillMaxWidth().clickable { onSelect(playlist) }.padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        AsyncImage(model = playlist.coverImgUrl, contentDescription = null, modifier = Modifier.size(36.dp))
+                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                            Text(playlist.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text("${playlist.trackCount} 首", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+                if (!loading && error == null && playlists.isEmpty()) item {
+                    Text("暂无可导入的自建歌单，可以新建歌单。", modifier = Modifier.padding(vertical = 12.dp))
+                }
+            }
+        }
+    }, confirmButton = { TextButton(onClick = onRefresh, enabled = !loading) { Text("刷新") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 
 @Composable

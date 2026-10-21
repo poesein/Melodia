@@ -8,6 +8,9 @@ import com.lin0721.linmusic.core.auth.UserProfile
 import com.lin0721.linmusic.core.model.Artist
 import com.lin0721.linmusic.core.model.PlaylistDetail
 import com.lin0721.linmusic.core.model.PlaylistTrackId
+import com.lin0721.linmusic.core.model.PlaylistCreator
+import com.lin0721.linmusic.core.userplaylist.UserPlaylist
+import com.lin0721.linmusic.core.userplaylist.UserPlaylistRepository
 import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.core.playlistmutation.PlaylistMutationBus
 import com.lin0721.linmusic.feature.create.data.CreateRepository
@@ -44,6 +47,8 @@ class PlaylistTextImportViewModelTest {
         val preferences = UserPreferences(MemoryPreferences())
         val searchQueries = mutableListOf<String>()
         var searchTracks = listOf(Track(10, "Starlight", listOf(Artist(name = "Muse"))))
+        var searchTracksByQuery = emptyMap<String, List<Track>>()
+        var failedQueries = emptySet<String>()
         var creates = 0
         var privacy = -1
         var additions = mutableListOf<List<Long>>()
@@ -52,15 +57,21 @@ class PlaylistTextImportViewModelTest {
         var failRead = false
         var timeoutRead = false
         var freshReads = 0
+        var targetOwner = 1L
+        var availablePlaylists = listOf(UserPlaylist(id = 50, name = "已有歌单", userId = 1))
+        var createdName = ""
 
         private val search = Proxy.newProxyInstance(SearchRepository::class.java.classLoader, arrayOf(SearchRepository::class.java)) { _, method, args ->
             check(method.name == "search")
-            searchQueries += args[0] as String
-            flowOf(Result.success(SearchPageResult(searchTracks.map { SearchResultItem.SongItem(it) }, searchTracks.size, false, searchTracks.size)))
+            val query = args[0] as String
+            searchQueries += query
+            val tracks = searchTracksByQuery[query] ?: searchTracks
+            if (query in failedQueries) flowOf(Result.failure<SearchPageResult>(IllegalStateException("search failed")))
+            else flowOf(Result.success(SearchPageResult(tracks.map { SearchResultItem.SongItem(it) }, tracks.size, false, tracks.size)))
         } as SearchRepository
         private val create = object : CreateRepository {
             override fun createPlaylist(name: String, privacy: Int) = flowOf(Result.success(PlaylistDetail(id = 50))).also {
-                creates++; this@Fixture.privacy = privacy
+                creates++; this@Fixture.privacy = privacy; createdName = name
             }
         }
         private val playlists = Proxy.newProxyInstance(PlaylistRepository::class.java.classLoader, arrayOf(PlaylistRepository::class.java)) { _, method, args ->
@@ -80,9 +91,15 @@ class PlaylistTextImportViewModelTest {
             freshReads++
             if (timeoutRead) runBlocking { withTimeout(1) { delay(10_000) } }
             if (failRead) error("network unavailable")
-            PlaylistDetailResponse(200, PlaylistDetail(id = 50, trackIds = existing.map { PlaylistTrackId(it) }))
+            PlaylistDetailResponse(200, PlaylistDetail(id = 50, creator = PlaylistCreator(userId = targetOwner),
+                trackIds = existing.map { PlaylistTrackId(it) }))
         } as PlaylistApi
-        val vm = PlaylistTextImportViewModel(search, create, playlists, preferences, PlaylistMutationBus(), api)
+        private val userPlaylists = object : UserPlaylistRepository {
+            override fun getUserPlaylists(uid: Long, limit: Int) = flowOf(Result.success(availablePlaylists))
+            override fun updatePlaylistOrder(playlistIds: List<Long>) = flowOf(Result.failure<Unit>(IllegalStateException("Not used")))
+            override fun setPlaylistTop(playlistId: Long, top: Boolean) = flowOf(Result.failure<Unit>(IllegalStateException("Not used")))
+        }
+        val vm = PlaylistTextImportViewModel(search, create, playlists, preferences, PlaylistMutationBus(), api, userPlaylists)
         suspend fun load(text: String = "Starlight - Muse") {
             preferences.saveUserProfile(UserProfile(1, "fixture", ""))
             vm.loadDocument(text.toByteArray(), "test.txt")
@@ -176,13 +193,120 @@ class PlaylistTextImportViewModelTest {
         } finally { Dispatchers.resetMain() }
     }
 
+    @Test fun unresolvedArtistFirstQueryRetriesOppositeOrderAndMergesCandidates() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture()
+            val wrong = Track(11, "Honey Whiskey", listOf(Artist(name = "Nothing But Thieves")))
+            val correct = Track(12, "Particles", listOf(Artist(name = "Nothing But Thieves")))
+            f.searchTracksByQuery = mapOf("Nothing But Thieves Particles" to listOf(wrong),
+                "Particles Nothing But Thieves" to listOf(correct))
+            f.load("Nothing But Thieves-Particles")
+            assertEquals(listOf("Nothing But Thieves Particles", "Particles Nothing But Thieves"), f.searchQueries)
+            assertEquals(12L, f.vm.state.value.rows.single().selected?.id)
+            assertEquals(listOf(12L, 11L), f.vm.state.value.rows.single().candidates.map { it.id })
+            assertEquals(0, f.creates)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun alternateQueryFailureKeepsFirstCandidatesAndCanRetry() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture()
+            f.searchTracks = listOf(Track(20, "Starlight (Live)", listOf(Artist(name = "Muse"))))
+            f.failedQueries = setOf("Starlight Muse")
+            f.load("Muse-Starlight")
+            assertEquals(TextPlaylistStatus.ERROR, f.vm.state.value.rows.single().status)
+            assertEquals(20L, f.vm.state.value.rows.single().candidates.single().id)
+            f.failedQueries = emptySet()
+            f.searchTracksByQuery = mapOf("Starlight Muse" to listOf(Track(10, "Starlight", listOf(Artist(name = "Muse")))))
+            f.vm.retryUnresolved()
+            f.vm.state.first { it.rows.single().selected?.id == 10L && !it.matching }
+            assertEquals(0, f.creates)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun existingTargetSkipsPresentTracksAndDoesNotCreateOrRequireNewName() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture(); f.load(); f.existing = setOf(10)
+            f.availablePlaylists += UserPlaylist(id = 60, name = "别人的歌单", userId = 2)
+            f.vm.loadTargets()
+            val state = f.vm.state.first { it.targetPlaylists.isNotEmpty() && !it.loadingTargets }
+            assertEquals(listOf(50L), state.targetPlaylists.map { it.id })
+            f.vm.setTarget(state.targetPlaylists.single())
+            f.vm.setName("")
+            f.vm.save()
+            f.vm.state.first { it.finishedPlaylistId == 50L && !it.saving }
+            assertEquals(0, f.creates)
+            assertTrue(f.additions.isEmpty())
+            assertEquals(1, f.freshReads)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun existingTargetRetryPinsDestinationAndAddsOnlyMissingSongs() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture(); f.load(); f.failAdd = true
+            f.vm.loadTargets()
+            val targets = f.vm.state.first { it.targetPlaylists.isNotEmpty() && !it.loadingTargets }.targetPlaylists
+            f.vm.setTarget(targets.single())
+            f.vm.save()
+            f.vm.state.first { it.error != null && !it.saving }
+            assertEquals(50L, f.vm.state.value.activePlaylistId)
+            f.vm.setTarget(null)
+            assertEquals(50L, f.vm.state.value.targetPlaylist?.id)
+            f.failAdd = false; f.existing = setOf(10)
+            f.vm.save()
+            f.vm.state.first { it.finishedPlaylistId != null && !it.saving }
+            assertEquals(0, f.creates)
+            assertEquals(listOf(listOf(10L)), f.additions)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun existingTargetOwnershipIsRecheckedBeforeAdding() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture(); f.load()
+            f.vm.loadTargets()
+            val targets = f.vm.state.first { it.targetPlaylists.isNotEmpty() && !it.loadingTargets }.targetPlaylists
+            f.vm.setTarget(targets.single()); f.targetOwner = 2
+            f.vm.save()
+            val state = f.vm.state.first { it.error != null && !it.saving }
+            assertTrue(state.error!!.contains("不属于当前账户"))
+            assertEquals(0, f.creates)
+            assertTrue(f.additions.isEmpty())
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun returningToNewTargetUsesEnteredPlaylistName() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture(); f.load()
+            f.vm.loadTargets()
+            val targets = f.vm.state.first { it.targetPlaylists.isNotEmpty() && !it.loadingTargets }.targetPlaylists
+            f.vm.setTarget(targets.single()); f.vm.setTarget(null)
+            f.vm.setName("  自选歌单  ")
+            f.vm.save()
+            f.vm.state.first { it.finishedPlaylistId != null && !it.saving }
+            assertEquals(1, f.creates)
+            assertEquals("自选歌单", f.createdName)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
     @Test fun failedAddRetriesSameTargetWithoutReaddingExistingTracks() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val f = Fixture(); f.load(); f.failAdd = true
             f.vm.save()
             f.vm.state.first { it.error != null && !it.saving }
-            assertEquals(50L, f.vm.state.value.createdPlaylistId)
+            assertEquals(50L, f.vm.state.value.activePlaylistId)
             f.vm.setName("changed")
             assertEquals("test", f.vm.state.value.name)
             f.failAdd = false; f.existing = setOf(10)
@@ -232,7 +356,7 @@ class PlaylistTextImportViewModelTest {
             f.vm.save()
             val failed = f.vm.state.first { it.error != null && !it.saving }
             assertTrue(failed.error!!.contains("超时"))
-            assertEquals(50L, failed.createdPlaylistId)
+            assertEquals(50L, failed.activePlaylistId)
             f.timeoutRead = false; f.failAdd = false; f.existing = setOf(10)
             f.vm.save()
             f.vm.state.first { it.finishedPlaylistId != null && !it.saving }

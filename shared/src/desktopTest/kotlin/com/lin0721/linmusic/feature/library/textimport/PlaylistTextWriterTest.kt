@@ -61,6 +61,25 @@ class PlaylistTextWriterTest {
         catch (_: IllegalArgumentException) { }
     }
 
+    @Test fun existingPlaylistReadsBeforeFirstWriteAndOnlyAddsMissingInOrder() = runTest {
+        val writes = mutableListOf<List<Long>>()
+        val writer = PlaylistTextWriter()
+        assertEquals(80L, writer.write(listOf(3, 2, 1), { error("must not create") },
+            { id, ids -> assertEquals(80L, id); writes.add(ids); Unit }, { setOf(2) }, existingPlaylistId = 80))
+        assertEquals(listOf(listOf(3L, 1L)), writes)
+    }
+
+    @Test fun existingReadFailurePreventsWritesAndSessionCannotSwitchTarget() = runTest {
+        val writer = PlaylistTextWriter()
+        try { writer.write(listOf(1), { error("must not create") }, { _, _ -> fail() },
+            { error("read failed") }, existingPlaylistId = 80); fail() } catch (_: IllegalStateException) { }
+        assertEquals(80L, writer.playlistId)
+        try { writer.write(listOf(1), { error("must not create") }, { _, _ -> fail() },
+            { emptySet() }, existingPlaylistId = 90); fail() } catch (_: IllegalArgumentException) { }
+        writer.write(listOf(1), { error("must not create") }, { _, ids -> assertEquals(listOf(1L), ids) },
+            { emptySet() }, existingPlaylistId = 80)
+    }
+
     @Test fun cancellationIsNotConvertedToSuccessOrReadRetry() = runTest {
         val writer = PlaylistTextWriter()
         var reads = 0
