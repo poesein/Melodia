@@ -84,25 +84,33 @@ class PlaylistTextImportViewModel(
         if (!_state.value.selectionLocked) _state.update { it.copy(isPrivate = value) }
     }
 
-    fun loadDocument(bytes: ByteArray, fileName: String) {
+    fun loadDocument(bytes: ByteArray, fileName: String) = loadContent(fileName,
+        fileName.substringBeforeLast('.', fileName).take(40)) {
+        PlaylistTextDocument.parse(PlaylistTextDocument.decode(bytes))
+    }
+
+    fun loadText(text: String) = loadContent("粘贴的文本", "导入歌单") { PlaylistTextDocument.parse(text) }
+
+    private fun loadContent(sourceName: String, playlistName: String, parseRows: () -> List<TextPlaylistRow>) {
         if (_state.value.selectionLocked) return
         val previous = matchJob
         previous?.cancel()
         matchJob = viewModelScope.launch {
             previous?.join()
-            _state.value = PlaylistTextImportState(fileName = fileName, loading = true)
+            _state.value = PlaylistTextImportState(fileName = sourceName, loading = true)
+            writer = PlaylistTextWriter()
+            accountId = null
             try {
-                val rows = withContext(Dispatchers.Default) { PlaylistTextDocument.parse(PlaylistTextDocument.decode(bytes)) }
+                val rows = withContext(Dispatchers.Default) { parseRows() }
                 ensureActive()
                 accountId = userPreferences.userProfile.first()?.uid
-                writer = PlaylistTextWriter()
-                _state.value = PlaylistTextImportState(fileName = fileName,
-                    name = fileName.substringBeforeLast('.', fileName).take(40), rows = rows, matching = true)
+                _state.value = PlaylistTextImportState(fileName = sourceName,
+                    name = playlistName, rows = rows, matching = true)
                 matchRows(rows.filter { it.status == TextPlaylistStatus.PENDING })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 _state.update { it.copy(loading = false, matching = false,
-                    error = (error as? IllegalArgumentException)?.message ?: "无法读取文件，请选择有效的 TXT") }
+                    error = (error as? IllegalArgumentException)?.message ?: "无法读取内容，请检查 TXT 文本格式") }
             }
         }
     }
@@ -141,7 +149,8 @@ class PlaylistTextImportViewModel(
         if (_state.value.selectionLocked || _state.value.matching) return
         updateRow(line) { row ->
             if (track.id <= 0 || row.candidates.none { it.id == track.id }) row
-            else row.copy(selected = track, included = true, status = TextPlaylistStatus.MATCHED, message = "已手动选择")
+            else row.copy(title = track.name, artist = track.ar.joinToString(" / ") { it.name },
+                selected = track, included = true, status = TextPlaylistStatus.MATCHED, message = "已手动选择")
         }
     }
 

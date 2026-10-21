@@ -76,6 +76,73 @@ class PlaylistTextDocumentTest {
         assertEquals(8, result.candidates.size)
     }
 
+    @Test fun all26SongsCanMixBothOrdersAndCompactSeparators() {
+        val expected = PlaylistTextDocument.parse(sample)
+        val mixed = expected.mapIndexed { index, row ->
+            when (index % 3) {
+                0 -> "${row.artist}-${row.title}"
+                1 -> "${row.title} - ${row.artist}"
+                else -> "${row.artist} – ${row.title}"
+            }
+        }.joinToString("\n")
+        PlaylistTextDocument.parse(mixed).zip(expected).forEachIndexed { index, (row, source) ->
+            val result = PlaylistTextDocument.resolve(row, listOf(track(index + 1L, source.title, source.artist)))
+            assertEquals(TextPlaylistStatus.MATCHED, result.status)
+            assertEquals(source.title, result.title)
+            assertEquals(source.artist, result.artist)
+        }
+    }
+
+    @Test fun compactChineseAndFullWidthSeparatorsAreSupported() {
+        listOf("周杰伦-晴天", "晴天-周杰伦", "周杰伦－晴天", "晴天 — 周杰伦").forEach {
+            val result = PlaylistTextDocument.resolve(PlaylistTextDocument.parse(it).single(), listOf(track(1, "晴天", "周杰伦")))
+            assertEquals(1L, result.selected?.id)
+            assertEquals("晴天", result.title)
+        }
+    }
+
+    @Test fun hyphenatedArtistIsPreservedInBothExplicitAndCompactText() {
+        listOf("Jay-Z - Numb/Encore", "Jay-Z-Numb/Encore", "Numb/Encore-Jay-Z").forEach {
+            val result = PlaylistTextDocument.resolve(PlaylistTextDocument.parse(it).single(), listOf(track(1, "Numb/Encore", "Jay-Z")))
+            assertEquals(1L, result.selected?.id)
+            assertEquals("Jay-Z", result.artist)
+        }
+    }
+
+    @Test fun reciprocalSongsRequireReviewInsteadOfGuessingFieldOrder() {
+        val result = PlaylistTextDocument.resolve(PlaylistTextDocument.parse("Muse - Starlight").single(),
+            listOf(track(1), track(2, "Muse", "Starlight")))
+        assertNull(result.selected)
+        assertEquals(TextPlaylistStatus.REVIEW, result.status)
+        assertEquals(listOf(1L, 2L), result.candidates.map { it.id }.sorted())
+    }
+
+    @Test fun ambiguousCompactSplitRequiresReview() {
+        val result = PlaylistTextDocument.resolve(PlaylistTextDocument.parse("A-B-C").single(),
+            listOf(track(1, "A-B", "C"), track(2, "A", "B-C")))
+        assertNull(result.selected)
+        assertEquals(TextPlaylistStatus.REVIEW, result.status)
+    }
+
+    @Test fun reverseOrderStillRejectsLiveAndWrongArtists() {
+        val result = PlaylistTextDocument.resolve(PlaylistTextDocument.parse("Muse-Starlight").single(),
+            listOf(track(1, "Starlight (Live)"), track(2, artist = "Other")))
+        assertNull(result.selected)
+        assertEquals(TextPlaylistStatus.REVIEW, result.status)
+    }
+
+    @Test fun sameTitleArtistEditionsStillUseHighestRankedExactResult() {
+        val result = PlaylistTextDocument.resolve(PlaylistTextDocument.parse("Muse-Starlight").single(), listOf(track(2), track(1)))
+        assertEquals(2L, result.selected?.id)
+    }
+
+    @Test fun pastedTextIsBoundedAndCannotContainBinaryNulls() {
+        assertThrows(IllegalArgumentException::class.java) { PlaylistTextDocument.parse("a\u0000b - Muse") }
+        assertThrows(IllegalArgumentException::class.java) { PlaylistTextDocument.parse("a".repeat(PlaylistTextDocument.MAX_BYTES + 1)) }
+        assertThrows(IllegalArgumentException::class.java) { PlaylistTextDocument.parse("中".repeat(PlaylistTextDocument.MAX_BYTES / 3 + 1)) }
+        assertEquals(TextPlaylistStatus.INVALID, PlaylistTextDocument.parse("-".repeat(10_000)).single().status)
+    }
+
     @Test fun selectedIdsRespectExclusionsAndDeduplicateInFileOrder() {
         val rows = listOf(TextPlaylistRow(1, "", selected = track(7)), TextPlaylistRow(2, "", selected = track(3)),
             TextPlaylistRow(3, "", selected = track(7)), TextPlaylistRow(4, "", selected = track(9), included = false), TextPlaylistRow(5, ""))

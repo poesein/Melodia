@@ -25,7 +25,17 @@ data class TextPlaylistRow(
 object PlaylistTextDocument {
     const val MAX_BYTES = 1024 * 1024
     const val MAX_ROWS = 500
-    private val separator = Regex("\\s+[-–—]\\s+|\\t+")
+    private val separator = Regex("\\s+[-–—－]\\s+|\\t+")
+    private val compactSeparator = Regex("[-–—－]")
+
+    private fun fields(value: String): List<Pair<String, String>> {
+        // Prefer explicit separators so names such as Jay-Z and AC-DC stay intact.
+        // For compact text, keep all possible splits until online metadata can disambiguate them.
+        val explicit = separator.findAll(value).toList()
+        return (explicit.ifEmpty { compactSeparator.findAll(value).toList() }).map { split ->
+            value.substring(0, split.range.first).trim() to value.substring(split.range.last + 1).trim()
+        }
+    }
 
     fun decode(bytes: ByteArray): String {
         require(bytes.size <= MAX_BYTES) { "TXT 文件不能超过 1 MiB" }
@@ -49,18 +59,18 @@ object PlaylistTextDocument {
     }
 
     fun parse(text: String): List<TextPlaylistRow> {
+        require(text.length <= MAX_BYTES && text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "导入文本不能超过 1 MiB" }
+        require('\u0000' !in text) { "内容不是有效的文本" }
         val lines = text.removePrefix("\uFEFF").lineSequence().withIndex().filter { it.value.isNotBlank() }.take(MAX_ROWS + 1).toList()
-        require(lines.isNotEmpty()) { "文件中没有歌曲" }
+        require(lines.isNotEmpty()) { "内容中没有歌曲" }
         require(lines.size <= MAX_ROWS) { "每次最多导入 $MAX_ROWS 行歌曲" }
         val seen = mutableSetOf<Pair<String, String>>()
         return lines.map { (index, raw) ->
             val value = raw.trim()
-            val split = separator.findAll(value).lastOrNull()
-            val title = split?.let { value.substring(0, it.range.first).trim() }.orEmpty()
-            val artist = split?.let { value.substring(it.range.last + 1).trim() }.orEmpty()
+            val (title, artist) = if (value.length <= 1000) fields(value).lastOrNull() ?: ("" to "") else "" to ""
             when {
                 identity(title).isBlank() || identity(artist).isBlank() || value.length > 1000 -> TextPlaylistRow(index + 1, value,
-                    status = TextPlaylistStatus.INVALID, included = false, message = "格式应为：歌名 - 歌手")
+                    status = TextPlaylistStatus.INVALID, included = false, message = "每行填写：歌名 - 歌手，或歌手 - 歌名")
                 !seen.add(identity(title) to identity(artist)) -> TextPlaylistRow(index + 1, value, title, artist,
                     TextPlaylistStatus.DUPLICATE, included = false, message = "重复行，已跳过")
                 else -> TextPlaylistRow(index + 1, value, title, artist)
@@ -75,13 +85,27 @@ object PlaylistTextDocument {
         val valid = candidates.filter { it.id > 0 }.distinctBy { it.id }
         // Same title/artist editions may differ in album. Prefer the service's highest-ranked exact entry;
         // title version words are retained, so Live/Remix never silently replace an unqualified title.
-        val exact = valid.firstOrNull { track ->
-            identity(track.name) == identity(row.title) && track.ar.any { identity(it.name) == identity(row.artist) }
-        }
-        val preview = if (exact != null) (listOf(exact) + valid).distinctBy { it.id }.take(8) else valid.take(8)
-        return row.copy(candidates = preview, selected = exact,
+        val interpretations = fields(row.original).ifEmpty { listOf(row.title to row.artist) }
+            .flatMap { (left, right) -> listOf(left to right, right to left) }
+            .filter { (title, artist) -> identity(title).isNotBlank() && identity(artist).isNotBlank() }
+            .distinctBy { (title, artist) -> identity(title) to identity(artist) }
+        val matches = interpretations.mapNotNull { (title, artist) ->
+            valid.firstOrNull { track ->
+                identity(track.name) == identity(title) && track.ar.any { identity(it.name) == identity(artist) }
+            }?.let { Triple(title, artist, it) }
+        }.distinctBy { it.third.id }
+        // Swapped fields or an internal hyphen can describe different real songs. Do not guess.
+        val exact = matches.singleOrNull()
+        val preview = (matches.map { it.third } + valid).distinctBy { it.id }.take(8)
+        return row.copy(title = exact?.first ?: row.title, artist = exact?.second ?: row.artist,
+            candidates = preview, selected = exact?.third,
             status = if (exact != null) TextPlaylistStatus.MATCHED else if (valid.isEmpty()) TextPlaylistStatus.NOT_FOUND else TextPlaylistStatus.REVIEW,
-            message = if (exact != null) null else if (valid.isEmpty()) "未找到歌曲，可重新搜索" else "没有歌名与歌手都一致的条目，请点选候选")
+            message = when {
+                exact != null -> null
+                valid.isEmpty() -> "未找到歌曲，可重新搜索"
+                matches.size > 1 -> "歌名、歌手或分隔位置存在歧义，请点选正确候选"
+                else -> "没有歌名与歌手都一致的条目，请点选候选"
+            })
     }
 
     fun selectedIds(rows: List<TextPlaylistRow>): List<Long> = rows.filter { it.included }

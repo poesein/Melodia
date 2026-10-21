@@ -39,6 +39,8 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
     val scope = rememberCoroutineScope()
     var reading by remember { mutableStateOf(false) }
     var onlyUnresolved by remember { mutableStateOf(false) }
+    var showPasteDialog by remember { mutableStateOf(false) }
+    var pastedText by remember { mutableStateOf("") }
     val saving by rememberUpdatedState(state.saving)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { !saving })
@@ -91,12 +93,16 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text("导入歌单", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
+                TextButton(onClick = { showPasteDialog = true },
+                    enabled = !reading && !state.loading && !state.matching && !state.selectionLocked) {
+                    Text("粘贴文本")
+                }
                 TextButton(onClick = { picker.launch(arrayOf("text/*", "application/octet-stream")) },
                     enabled = !reading && !state.loading && !state.matching && !state.selectionLocked) {
                     Text(if (state.rows.isEmpty()) "选择 TXT" else "更换文件")
                 }
             }
-            Text("每行：歌名 - 歌手。匹配后确认，创建到当前网易云账户。",
+            Text("每行一首，歌名 - 歌手或歌手 - 歌名均可。先预览，再确认导入。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (state.fileName.isNotBlank()) Text(state.fileName, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
@@ -104,7 +110,7 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
                 LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 8.dp))
                 Text(when {
                     state.saving -> "正在导入，请稍候…"
-                    reading || state.loading -> "正在读取文件…"
+                    reading || state.loading -> "正在读取内容…"
                     else -> "正在匹配 ${state.rows.count { it.status != TextPlaylistStatus.PENDING }}/${state.rows.size}"
                 }, style = MaterialTheme.typography.labelMedium)
             }
@@ -127,7 +133,7 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
             val visible = if (onlyUnresolved) state.rows.filter { it.status in unresolvedStatuses } else state.rows
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (state.rows.isEmpty()) item {
-                    Text("例如：\nMap of the Problematique - Muse\nStarlight - Muse\n\n支持 UTF-8、UTF-16（带 BOM）和 GB18030，最多 500 行。\n只自动选择歌名、歌手一致的结果；其他结果由你确认。",
+                    Text("选择 TXT 文件，或直接粘贴文本，例如：\nMap of the Problematique - Muse\nMuse - Starlight\n周杰伦-晴天\n\n两种顺序可混用，分隔横线两侧可不加空格。最多 500 行。\n文件支持 UTF-8、UTF-16（带 BOM）和 GB18030。\n只自动选择歌名、歌手一致且顺序无歧义的结果；其他结果由你确认。",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp))
                 }
@@ -156,6 +162,34 @@ fun PlaylistTextImportSheet(onDismiss: () -> Unit, onImported: (Long) -> Unit) {
             }
         }
     }
+    if (showPasteDialog) {
+        PlaylistTextPasteDialog(text = pastedText, onTextChange = { pastedText = it },
+            onDismiss = { showPasteDialog = false }, onConfirm = {
+                showPasteDialog = false
+                onlyUnresolved = false
+                viewModel.loadText(pastedText)
+            })
+    }
+}
+
+@Composable
+internal fun PlaylistTextPasteDialog(text: String, onTextChange: (String) -> Unit,
+    onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("粘贴歌单文本") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("长按输入框粘贴，每行一首。歌名与歌手的前后顺序会自动识别。",
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(value = text, onValueChange = onTextChange,
+                    label = { Text("歌单文本") },
+                    placeholder = { Text("Starlight - Muse\nMuse - Invincible\n周杰伦-晴天") },
+                    minLines = 5, maxLines = 10, modifier = Modifier.fillMaxWidth())
+                Text("最多 500 行、1 MiB；开始匹配后仍可预览和修改，确认前不会创建歌单。",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm, enabled = text.isNotBlank()) { Text("开始匹配") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 
 private val unresolvedStatuses = setOf(TextPlaylistStatus.PENDING, TextPlaylistStatus.REVIEW, TextPlaylistStatus.NOT_FOUND, TextPlaylistStatus.ERROR)
@@ -163,8 +197,8 @@ private val unresolvedStatuses = setOf(TextPlaylistStatus.PENDING, TextPlaylistS
 @Composable
 private fun ImportSongRow(row: TextPlaylistRow, enabled: Boolean, onInclude: (Boolean) -> Unit,
     onSelect: (com.lin0721.linmusic.core.model.Track) -> Unit, onSearch: (String) -> Unit) {
-    var expanded by remember(row.line) { mutableStateOf(false) }
-    var query by remember(row.line) { mutableStateOf("${row.title} ${row.artist}".trim()) }
+    var expanded by remember(row.line, row.original) { mutableStateOf(false) }
+    var query by remember(row.line, row.original) { mutableStateOf("${row.title} ${row.artist}".trim()) }
     val editable = row.status !in setOf(TextPlaylistStatus.INVALID, TextPlaylistStatus.DUPLICATE)
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().clickable(enabled = editable) { expanded = !expanded }.padding(vertical = 8.dp),
@@ -172,7 +206,7 @@ private fun ImportSongRow(row: TextPlaylistRow, enabled: Boolean, onInclude: (Bo
             Checkbox(checked = row.selected != null && row.included, onCheckedChange = onInclude,
                 enabled = enabled && row.selected != null)
             Column(Modifier.weight(1f)) {
-                Text("${row.line}. ${row.title.ifBlank { row.original }}", maxLines = 2,
+                Text("${row.line}. ${row.selected?.name ?: row.original}", maxLines = 2,
                     overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                 Text(row.selected?.let { "${it.ar.joinToString(" / ") { a -> a.name }} · ${it.al.name}" }
                     ?: row.message ?: if (row.status == TextPlaylistStatus.PENDING) "等待匹配 · ${row.artist}" else row.artist,

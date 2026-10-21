@@ -309,7 +309,7 @@ fun LibraryScreen(
                                         showLoginSheet = true
                                     }
                                 })
-                                DropdownMenuItem(text = { Text("导入歌单（TXT）") }, onClick = {
+                                DropdownMenuItem(text = { Text("导入歌单（TXT / 文本）") }, onClick = {
                                     showAddMenu = false
                                     if (userProfile != null) showTextImport = true
                                     else {

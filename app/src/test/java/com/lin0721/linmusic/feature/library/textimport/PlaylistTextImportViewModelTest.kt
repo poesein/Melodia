@@ -127,6 +127,55 @@ class PlaylistTextImportViewModelTest {
         } finally { Dispatchers.resetMain() }
     }
 
+    @Test fun pastedArtistFirstTextUsesPreviewWithoutCreatingPlaylist() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture()
+            f.preferences.saveUserProfile(UserProfile(1, "fixture", ""))
+            f.vm.loadText("Muse-Starlight\nStarlight - Muse")
+            val state = f.vm.state.first { it.rows.isNotEmpty() && !it.matching }
+            assertEquals("粘贴的文本", state.fileName)
+            assertEquals("导入歌单", state.name)
+            assertTrue(state.isPrivate)
+            assertTrue(state.rows.all { it.title == "Starlight" && it.selected?.id == 10L })
+            assertEquals(1, state.selectedCount)
+            assertEquals(0, f.creates)
+            f.vm.save()
+            f.vm.state.first { it.finishedPlaylistId != null && !it.saving }
+            assertEquals(listOf(listOf(10L)), f.additions)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun invalidPastedTextShowsErrorBeforeSearching() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture()
+            f.vm.loadText("\u0000")
+            val state = f.vm.state.first { it.error != null && !it.loading }
+            assertTrue(state.rows.isEmpty())
+            assertTrue(f.searchQueries.isEmpty())
+            assertEquals(0, f.creates)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun pastedTextCanReplaceAFilePreviewAndUncertainResultCanBeSelected() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val f = Fixture(); f.load()
+            f.searchTracks = listOf(Track(20, "Invincible (Live)", listOf(Artist(name = "Muse"))))
+            f.vm.loadText("Muse-Invincible")
+            val state = f.vm.state.first { it.fileName == "粘贴的文本" && it.rows.isNotEmpty() && !it.matching }
+            assertEquals(TextPlaylistStatus.REVIEW, state.rows.single().status)
+            f.vm.select(1, f.searchTracks.single())
+            assertEquals("Invincible (Live)", f.vm.state.value.rows.single().title)
+            assertEquals(1, f.vm.state.value.selectedCount)
+            assertEquals(0, f.creates)
+            f.vm.reset()
+        } finally { Dispatchers.resetMain() }
+    }
+
     @Test fun failedAddRetriesSameTargetWithoutReaddingExistingTracks() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
