@@ -50,12 +50,16 @@ data class LocalLibraryIndex(
 ) {
     private val artistsByName = artists.associateBy { it.name }
     private val albumsByKey = albums.associateBy { it.key }
+    private val albumsByTrackUri = buildMap {
+        albums.forEach { album -> album.tracks.forEach { put(it.uri.toString(), album) } }
+    }
     private val foldersByPath = folders.associateBy { it.path }
 
     val totalSizeBytes: Long get() = tracks.sumOf { it.sizeBytes }
 
     fun artist(name: String): LocalArtist? = artistsByName[name]
     fun album(key: String): LocalAlbum? = albumsByKey[key]
+    fun albumForTrack(track: LocalTrack): LocalAlbum? = albumsByTrackUri[track.uri.toString()]
     fun folder(path: String): LocalFolderGroup? = foldersByPath[path]
 
     // "未知专辑"不计入专辑数，也不上首页
@@ -70,10 +74,10 @@ data class LocalLibraryIndex(
     }
 }
 
-// 没有专辑标签时 MediaStore 会拿所在文件夹名顶替，这种情况按无专辑处理
+// 真实专辑标签通常与专辑目录同名，不能仅凭目录名相等推断标签缺失。
+@Suppress("UNUSED_PARAMETER")
 fun albumTitleOf(album: String?, folderPath: String?): String? {
-    val name = album?.trim()?.takeIf { it.isNotEmpty() && it != "<unknown>" } ?: return null
-    return name.takeIf { it != folderPath?.substringAfterLast('/') }
+    return album?.trim()?.takeIf { it.isNotEmpty() && it != "<unknown>" }
 }
 
 val LocalTrack.albumTitle: String? get() = albumTitleOf(album, folderPath)
@@ -82,9 +86,13 @@ val LocalTrack.albumName: String get() = albumTitle ?: UNKNOWN_ALBUM_NAME
 
 val LocalTrack.primaryArtist: String get() = splitArtists(artist).first()
 
-private val LocalTrack.albumOwner: String get() = albumArtist?.let { splitArtists(it).first() } ?: primaryArtist
+private val LocalTrack.albumOwner: String get() = localAlbumOwner(artist, albumArtist)
 
-// 按专辑名 + 专辑歌手聚合：同名专辑按歌手区分，合辑靠专辑歌手标签归到一起
+// SAF document IDs provide album directory evidence without inventing a filesystem path.
+internal val LocalTrack.albumGroupingFolder: String?
+    get() = localAlbumFolderOf(path, uri.toString())
+
+// 单条曲目的传统专辑身份；完整曲库中的目录合辑必须通过 LocalLibraryIndex 查询。
 val LocalTrack.albumKey: String
     get() = albumTitle?.let { "$it|$albumOwner" } ?: UNKNOWN_ALBUM_KEY
 
@@ -99,11 +107,16 @@ private val albumTrackOrder = compareBy<LocalTrack>(
 )
 
 fun buildLocalLibraryIndex(tracks: List<LocalTrack>): LocalLibraryIndex {
-    val albums = tracks.groupBy { it.albumKey }.map { (key, albumTracks) ->
-        val owners = albumTracks.groupingBy { it.albumOwner }.eachCount()
+    val identities = resolveLocalAlbumGroups(tracks.map {
+        LocalAlbumGroupMetadata(it.album, it.artist, it.albumArtist, it.albumGroupingFolder)
+    })
+    val albumKeysByUri = tracks.indices.associate { tracks[it].uri.toString() to identities[it].key }
+    val albums = tracks.indices.groupBy { identities[it].key }.map { (key, indices) ->
+        val albumTracks = indices.map(tracks::get)
+        val owners = indices.groupingBy { identities[it].owner }.eachCount()
         LocalAlbum(
             key = key,
-            name = albumTracks.first().albumName,
+            name = identities[indices.first()].name,
             artist = when {
                 key == UNKNOWN_ALBUM_KEY && owners.size > 1 -> VARIOUS_ARTISTS
                 else -> owners.maxByOrNull { it.value }?.key ?: UNKNOWN_ARTIST_NAME
@@ -121,7 +134,7 @@ fun buildLocalLibraryIndex(tracks: List<LocalTrack>): LocalLibraryIndex {
         LocalArtist(
             name = name,
             tracks = artistTracks.sortedWith(compareBy({ it.albumName.lowercase() }, { it.trackNumber ?: Int.MAX_VALUE }, { it.title.lowercase() })),
-            albumCount = artistTracks.mapTo(HashSet()) { it.albumKey }.count { it != UNKNOWN_ALBUM_KEY }
+            albumCount = artistTracks.mapTo(HashSet()) { albumKeysByUri.getValue(it.uri.toString()) }.count { it != UNKNOWN_ALBUM_KEY }
         )
     }.sortedWith(compareByDescending<LocalArtist> { it.tracks.size }.thenBy { it.name.lowercase() })
 

@@ -62,8 +62,9 @@ class LocalLibraryIndexTest {
     // ======================= 专辑名识别 =======================
 
     @Test
-    fun `专辑名等于所在文件夹名时视为无专辑标签`() {
-        assertNull(albumTitleOf("边听边存", "/storage/emulated/0/Music/Melodia/边听边存"))
+    fun `真实专辑名等于所在文件夹名时仍然保留`() {
+        assertEquals("50 Classical Masterworks",
+            albumTitleOf("50 Classical Masterworks", "/storage/emulated/0/Music/50 Classical Masterworks"))
     }
 
     @Test

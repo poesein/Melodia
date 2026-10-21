@@ -25,11 +25,6 @@ import com.lin0721.linmusic.core.ui.components.LoginBottomSheet
 import com.lin0721.linmusic.core.ui.components.ToastManager
 import com.lin0721.linmusic.core.ui.components.WebViewLoginScreen
 import com.lin0721.linmusic.core.ui.theme.ScreenSlideDurationMs
-import com.lin0721.linmusic.feature.music.ui.MusicContent
-import com.lin0721.linmusic.feature.music.ui.MusicViewModel
-import com.lin0721.linmusic.feature.newworks.ui.NewWorksFeedActions
-import com.lin0721.linmusic.feature.newworks.ui.NewWorksFeedContent
-import com.lin0721.linmusic.feature.newworks.ui.NewWorksViewModel
 import com.lin0721.linmusic.feature.podcast.ui.PodcastHomeActions
 import com.lin0721.linmusic.feature.podcast.ui.PodcastHomeContent
 import com.lin0721.linmusic.feature.podcast.ui.PodcastHomeViewModel
@@ -43,35 +38,22 @@ internal const val TAB_PODCAST = 2
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = koinViewModel(),
-    musicViewModel: MusicViewModel = koinViewModel(),
     podcastViewModel: PodcastHomeViewModel = koinViewModel(),
-    newWorksViewModel: NewWorksViewModel = koinViewModel(),
     selectedTab: Int = TAB_ALL,
     onTabSelected: (Int) -> Unit = {},
-    // 音乐 tab「最新」二级药丸的选中态：由 MelodiaNavigationState 持有，
-    // 避免从新作 feed 点进详情页再返回时（HomeScreen 被销毁重建）状态丢失回到曲风浏览
-    showNewWorksFeed: Boolean = false,
-    onShowNewWorksFeedChanged: (Boolean) -> Unit = {},
     onPlaylistClick: (Long, Boolean) -> Unit = { _, _ -> },
     onArtistClick: (Long) -> Unit = {},
     onRadioClick: (Long) -> Unit = {},
     onPodcastSubscribedClick: () -> Unit = {},
     onPodcastToplistClick: () -> Unit = {},
     onPodcastCategoryClick: (id: Long, name: String) -> Unit = { _, _ -> },
-    onStyleClick: (id: Long, name: String) -> Unit = { _, _ -> },
-    onSearchClick: () -> Unit = {},
     onOpenSidebar: () -> Unit = {},
     onLoginScreenVisibilityChanged: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
-    val musicUiState by musicViewModel.uiState.collectAsStateWithLifecycle()
     val podcastState by podcastViewModel.state.collectAsStateWithLifecycle()
-    val newWorksUiState by newWorksViewModel.uiState.collectAsStateWithLifecycle()
-    val newWorksCollectState by newWorksViewModel.collectState.collectAsStateWithLifecycle()
-    val newWorksImportState by newWorksViewModel.importState.collectAsStateWithLifecycle()
-    val newWorksStatus by newWorksViewModel.releaseStatus.collectAsStateWithLifecycle()
 
     var showLoginSheet by remember { mutableStateOf(false) }
     var showWebViewLogin by remember { mutableStateOf(false) }
@@ -87,22 +69,11 @@ fun HomeScreen(
         }
     }
 
-    LaunchedEffect(newWorksViewModel) {
-        newWorksViewModel.toastEvent.collect { message ->
-            ToastManager.showToast(message)
-        }
-    }
-
     // 各 tab 的数据都等真正切过去才拉，避免拖慢「全部」的首屏
     LaunchedEffect(selectedTab) {
         when (selectedTab) {
-            TAB_MUSIC -> musicViewModel.loadIfNeeded()
             TAB_PODCAST -> podcastViewModel.loadIfNeeded()
         }
-    }
-
-    LaunchedEffect(showNewWorksFeed) {
-        if (showNewWorksFeed) newWorksViewModel.loadIfNeeded()
     }
 
     val onAvatarClick: () -> Unit = {
@@ -119,47 +90,16 @@ fun HomeScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 顶栏跨 tab 只渲染一次，切 tab 时不会被重建，FilterPills 的展开动画状态才能保留
+            // Keep the homepage header stable while switching all content and podcasts.
             HomeSharedHeader(
                 userProfile = userProfile,
                 selectedTab = selectedTab,
                 onTabSelected = onTabSelected,
-                secondarySelected = showNewWorksFeed,
-                onSecondarySelected = { onShowNewWorksFeedChanged(true) },
                 onAvatarClick = onAvatarClick
             )
 
             Box(modifier = Modifier.weight(1f)) {
                 when {
-                    selectedTab == TAB_MUSIC && showNewWorksFeed -> NewWorksFeedContent(
-                        uiState = newWorksUiState,
-                        collectState = newWorksCollectState,
-                        importState = newWorksImportState,
-                        status = newWorksStatus,
-                        actions = remember(newWorksViewModel, onPlaylistClick) {
-                            NewWorksFeedActions(
-                                onAlbumClick = { id -> onPlaylistClick(id, true) },
-                                onTogglePlay = newWorksViewModel::togglePlayRelease,
-                                onToggleLibrary = newWorksViewModel::toggleInLibrary,
-                                onAddToPlayNext = newWorksViewModel::addToPlayNext,
-                                onPrepareCollect = newWorksViewModel::prepareCollectDialog,
-                                onSaveCollection = newWorksViewModel::savePlaylistCollection,
-                                onSaveNewCollection = newWorksViewModel::createPlaylistAndAddSong,
-                                onPrepareImportTargets = newWorksViewModel::prepareImportTargets,
-                                onAddToPlaylist = newWorksViewModel::addToPlaylist,
-                                onCreatePlaylistAndAdd = newWorksViewModel::createPlaylistAndAdd,
-                                onRetry = newWorksViewModel::load,
-                                onLoadMore = newWorksViewModel::loadMore
-                            )
-                        }
-                    )
-
-                    selectedTab == TAB_MUSIC -> MusicContent(
-                        uiState = musicUiState,
-                        onStyleClick = onStyleClick,
-                        onRetry = { musicViewModel.loadStyles() }
-                    )
-
                     selectedTab == TAB_PODCAST -> PodcastHomeContent(
                         state = podcastState,
                         actions = remember(podcastViewModel, onRadioClick, onPodcastSubscribedClick, onPodcastToplistClick, onPodcastCategoryClick) {

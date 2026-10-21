@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.AddBox
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.CloudQueue
@@ -543,6 +544,7 @@ fun MelodiaNavigationBar(
             val navItems = effectiveLayout.filter { it.visible }.map { setting ->
                 when (setting.item) {
                     BottomBarItem.HOME -> Triple("主页", Icons.Default.Home, Screen.Home)
+                    BottomBarItem.MUSIC -> Triple("音乐", Icons.Default.MusicNote, Screen.Music)
                     BottomBarItem.SEARCH -> Triple("搜索", Icons.Default.Search, Screen.Search)
                     BottomBarItem.LIBRARY -> Triple("音乐库", Icons.Default.LibraryMusic, Screen.Library)
                     BottomBarItem.CREATE -> Triple("创建", if (isCreateMenuOpen) Icons.Rounded.Close else Icons.Default.AddBox, null)
