@@ -187,6 +187,16 @@ fun MelodiaNavHost(
                         onNavigateToLocalMusic = onNavigateToLocalMusic
                     )
                 }
+                is Screen.PersonalLibrary -> com.lin0721.linmusic.feature.personallibrary.PersonalLibraryScreen(
+                    onPlaylistClick = { onNavigateToPlaylist(it, false) },
+                    onArtistClick = onNavigateToArtist,
+                    onAlbumClick = { onNavigateToPlaylist(it, true) },
+                    onLocalMusic = onNavigateToLocalMusic,
+                    localNavigation = localMusicNavigation,
+                    onSearch = onNavigateToSearch,
+                    onRecognition = onOpenRecognition,
+                    onLoginScreenVisibilityChanged = onLoginScreenVisibilityChanged
+                )
                 is Screen.LocalMusic -> LocalMusicHomeScreen(navigation = localMusicNavigation)
                 is Screen.LocalSongs -> LocalSongsScreen(navigation = localMusicNavigation)
                 is Screen.LocalArtists -> LocalArtistsScreen(navigation = localMusicNavigation)

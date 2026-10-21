@@ -545,6 +545,7 @@ fun MelodiaNavigationBar(
                 when (setting.item) {
                     BottomBarItem.HOME -> Triple("主页", Icons.Default.Home, Screen.Home)
                     BottomBarItem.MUSIC -> Triple("音乐", Icons.Default.MusicNote, Screen.Music)
+                    BottomBarItem.PERSONAL_LIBRARY -> Triple("个人音乐库", Icons.Default.LibraryMusic, Screen.PersonalLibrary)
                     BottomBarItem.SEARCH -> Triple("搜索", Icons.Default.Search, Screen.Search)
                     BottomBarItem.LIBRARY -> Triple("音乐库", Icons.Default.LibraryMusic, Screen.Library)
                     BottomBarItem.CREATE -> Triple("创建", if (isCreateMenuOpen) Icons.Rounded.Close else Icons.Default.AddBox, null)
@@ -592,6 +593,8 @@ fun MelodiaNavigationBar(
                     if (!iconOnly) {
                         Text(
                             text = label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             color = if (isSelected) Color.White else TextGray,
                             fontSize = 11.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal

@@ -53,16 +53,20 @@ import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.components.LocalAlbumCard
 import com.lin0721.linmusic.feature.localmusic.ui.components.LocalCover
 import org.koin.androidx.compose.koinViewModel
+import com.lin0721.linmusic.feature.personallibrary.LibraryPage
+import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutViewModel
 
 @Composable
 fun LocalArtistsScreen(
     navigation: LocalMusicNavigation,
-    viewModel: LocalMusicViewModel = koinViewModel()
+    viewModel: LocalMusicViewModel = koinViewModel(),
+    layoutModel: LibraryPageLayoutViewModel = koinViewModel()
 ) {
+    val layouts by layoutModel.state.collectAsStateWithLifecycle()
     val library by viewModel.library.collectAsStateWithLifecycle()
     CollectionScaffold(title = "歌手", navigation = navigation, viewModel = viewModel, isEmpty = library.artists.isEmpty()) {
         LazyColumn(contentPadding = PaddingValues(bottom = LocalBottomOverlayInset.current + MelodiaSpacing.md)) {
-            items(library.artists, key = { it.name }) { artist ->
+            items(layouts.getValue(LibraryPage.LOCAL).layout.orderedItems("artists", library.artists) { it.name }, key = { it.name }) { artist ->
                 CollectionRow(
                     coverSourceUri = artist.tracks.first().uri,
                     coverShape = CircleShape,
@@ -79,8 +83,10 @@ fun LocalArtistsScreen(
 @Composable
 fun LocalAlbumsScreen(
     navigation: LocalMusicNavigation,
-    viewModel: LocalMusicViewModel = koinViewModel()
+    viewModel: LocalMusicViewModel = koinViewModel(),
+    layoutModel: LibraryPageLayoutViewModel = koinViewModel()
 ) {
+    val layouts by layoutModel.state.collectAsStateWithLifecycle()
     val library by viewModel.library.collectAsStateWithLifecycle()
     val columns = rememberMelodiaGridColumns(compact = 2, expandedPortrait = 4, expandedLandscape = 6)
     CollectionScaffold(title = "专辑", navigation = navigation, viewModel = viewModel, isEmpty = library.albums.isEmpty()) {
@@ -95,7 +101,7 @@ fun LocalAlbumsScreen(
                 bottom = LocalBottomOverlayInset.current + MelodiaSpacing.md
             )
         ) {
-            items(library.albums, key = { it.key }) { album ->
+            items(layouts.getValue(LibraryPage.LOCAL).layout.orderedItems("albums", library.albums) { it.key }, key = { it.key }) { album ->
                 BoxWithConstraints {
                     LocalAlbumCard(
                         coverSourceUri = album.coverSourceUri,

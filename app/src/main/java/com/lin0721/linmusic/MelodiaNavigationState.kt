@@ -31,6 +31,8 @@ sealed class Screen {
     @Serializable
     data object Library : Screen()
     @Serializable
+    data object PersonalLibrary : Screen()
+    @Serializable
     data object Settings : Screen()
     @Serializable
     data class Artist(val id: Long) : Screen()
@@ -119,7 +121,9 @@ class MelodiaNavigationState(
     initialMusicIds: List<Long> = emptyList(),
     initialShowMusicNewWorks: Boolean = false,
     initialSearchReturnTab: Screen? = null,
-    initialShowHomeMusicNewWorks: Boolean = false
+    initialShowHomeMusicNewWorks: Boolean = false,
+    initialPersonalLibraryStack: List<Screen> = listOf(Screen.PersonalLibrary),
+    initialPersonalLibraryIds: List<Long> = emptyList()
 ) {
 
     private var nextEntryId = initialNextEntryId
@@ -148,9 +152,11 @@ class MelodiaNavigationState(
         .apply { addAll(buildEntries(initialMyProfileStack, initialMyProfileIds)) }
     private val musicStack = mutableStateListOf<NavEntry>()
         .apply { addAll(buildEntries(initialMusicStack, initialMusicIds)) }
+    private val personalLibraryStack = mutableStateListOf<NavEntry>()
+        .apply { addAll(buildEntries(initialPersonalLibraryStack, initialPersonalLibraryIds)) }
 
     private val allStacks: List<List<NavEntry>>
-        get() = listOf(homeStack, searchStack, libraryStack, localMusicStack, downloadsStack, cloudStack, myProfileStack, musicStack)
+        get() = listOf(homeStack, searchStack, libraryStack, localMusicStack, downloadsStack, cloudStack, myProfileStack, musicStack, personalLibraryStack)
 
     init {
         // 恢复的 id 可能大于计数器，避免之后分配出重复 id
@@ -168,7 +174,7 @@ class MelodiaNavigationState(
         private set
 
     private fun isTopLevelTab(screen: Screen): Boolean = when (screen) {
-        Screen.Home, Screen.Music, Screen.Search, Screen.Library,
+        Screen.Home, Screen.Music, Screen.Search, Screen.Library, Screen.PersonalLibrary,
         Screen.LocalMusic, Screen.Downloads, Screen.Cloud, Screen.MyProfile -> true
         else -> false
     }
@@ -181,6 +187,7 @@ class MelodiaNavigationState(
         Screen.Cloud -> cloudStack
         Screen.MyProfile -> myProfileStack
         Screen.Music -> musicStack
+        Screen.PersonalLibrary -> personalLibraryStack
         else -> homeStack
     }
 
@@ -220,7 +227,9 @@ class MelodiaNavigationState(
     // 页面内搜索是一次往返；底栏主动进入搜索时不继承返回目标。
     // 原栈帧保持不变，主页/独立音乐页的滚动位置和分类能一起恢复。
     private var searchReturnTab by mutableStateOf(
-        initialSearchReturnTab.takeIf { initialActiveTab == Screen.Search && (it == Screen.Home || it == Screen.Music) }
+        initialSearchReturnTab.takeIf {
+            initialActiveTab == Screen.Search && it in listOf(Screen.Home, Screen.Music, Screen.PersonalLibrary)
+        }
     )
 
     val canReturnFromSearch: Boolean
@@ -386,6 +395,7 @@ class MelodiaNavigationState(
         val returnTab = when (activeTab) {
             Screen.Home -> Screen.Home
             Screen.Music -> Screen.Music
+            Screen.PersonalLibrary -> Screen.PersonalLibrary
             Screen.Search -> searchReturnTab
             else -> null
         }
@@ -438,7 +448,9 @@ class MelodiaNavigationState(
         musicIds = musicStack.map { it.id },
         showMusicNewWorks = showMusicNewWorks,
         searchReturnTab = searchReturnTab,
-        showHomeMusicNewWorks = showHomeMusicNewWorks
+        showHomeMusicNewWorks = showHomeMusicNewWorks,
+        personalLibraryStack = personalLibraryStack.map { it.screen },
+        personalLibraryIds = personalLibraryStack.map { it.id }
     )
 }
 
@@ -467,7 +479,9 @@ internal data class NavigationSnapshot(
     val musicIds: List<Long> = emptyList(),
     val showMusicNewWorks: Boolean = false,
     val searchReturnTab: Screen? = null,
-    val showHomeMusicNewWorks: Boolean = false
+    val showHomeMusicNewWorks: Boolean = false,
+    val personalLibraryStack: List<Screen> = listOf(Screen.PersonalLibrary),
+    val personalLibraryIds: List<Long> = emptyList()
 )
 
 private fun tabIndex(tab: Screen): Int = when (tab) {
@@ -478,6 +492,7 @@ private fun tabIndex(tab: Screen): Int = when (tab) {
     Screen.Cloud -> 5
     Screen.MyProfile -> 6
     Screen.Music -> 7
+    Screen.PersonalLibrary -> 8
     else -> 0
 }
 
@@ -489,6 +504,7 @@ private fun tabFromIndex(index: Int): Screen = when (index) {
     5 -> Screen.Cloud
     6 -> Screen.MyProfile
     7 -> Screen.Music
+    8 -> Screen.PersonalLibrary
     else -> Screen.Home
 }
 
@@ -517,7 +533,9 @@ internal fun restoreNavigationSnapshot(snapshot: NavigationSnapshot): MelodiaNav
         initialMusicIds = snapshot.musicIds,
         initialShowMusicNewWorks = snapshot.showMusicNewWorks,
         initialSearchReturnTab = snapshot.searchReturnTab,
-        initialShowHomeMusicNewWorks = snapshot.showHomeMusicNewWorks
+        initialShowHomeMusicNewWorks = snapshot.showHomeMusicNewWorks,
+        initialPersonalLibraryStack = snapshot.personalLibraryStack.ifEmpty { listOf(Screen.PersonalLibrary) },
+        initialPersonalLibraryIds = snapshot.personalLibraryIds
     )
 }
 

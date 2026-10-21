@@ -44,7 +44,7 @@ private fun Screen.hasPageScopedViewModels(): Boolean = when (this) {
 }
 
 private fun Screen.isTabRoot(): Boolean = when (this) {
-    Screen.Home, Screen.Music, Screen.Search, Screen.Library,
+    Screen.Home, Screen.Music, Screen.Search, Screen.Library, Screen.PersonalLibrary,
     Screen.LocalMusic, Screen.Downloads, Screen.Cloud, Screen.MyProfile -> true
     else -> false
 }

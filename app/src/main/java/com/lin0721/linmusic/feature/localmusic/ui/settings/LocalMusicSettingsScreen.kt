@@ -48,6 +48,13 @@ import com.lin0721.linmusic.feature.player.ui.LyricCapsuleSlider
 import com.lin0721.linmusic.feature.settings.ui.SettingsGroupCard
 import com.lin0721.linmusic.feature.settings.ui.SettingsRow
 import com.lin0721.linmusic.feature.settings.ui.SettingsSwitchRow
+import com.lin0721.linmusic.feature.personallibrary.LibraryPage
+import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutViewModel
+import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutEditor
+import com.lin0721.linmusic.feature.personallibrary.LibrarySectionItemsSheet
+import com.lin0721.linmusic.feature.personallibrary.localLayoutCatalog
+import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicViewModel
+import androidx.compose.runtime.saveable.rememberSaveable
 import org.koin.androidx.compose.koinViewModel
 import kotlin.math.roundToInt
 
@@ -59,8 +66,15 @@ private val DividerColor = Color.White.copy(alpha = 0.08f)
 @Composable
 fun LocalMusicSettingsScreen(
     onBack: () -> Unit,
-    viewModel: LocalMusicSettingsViewModel = koinViewModel()
+    viewModel: LocalMusicSettingsViewModel = koinViewModel(),
+    layoutModel: LibraryPageLayoutViewModel = koinViewModel(),
+    localModel: LocalMusicViewModel = koinViewModel()
 ) {
+    val layouts by layoutModel.state.collectAsStateWithLifecycle()
+    val library by localModel.library.collectAsStateWithLifecycle()
+    val playlists by localModel.playlists.collectAsStateWithLifecycle()
+    var managedSection by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(localModel) { localModel.ensureLoaded() }
     val minDurationSec by viewModel.minDurationSec.collectAsStateWithLifecycle()
     val hiddenCount by viewModel.hiddenCount.collectAsStateWithLifecycle()
     val folders by viewModel.folders.collectAsStateWithLifecycle()
@@ -90,6 +104,13 @@ fun LocalMusicSettingsScreen(
                 SettingsGroupCard("本地音频关联") {
                     LocalMatchingSettingsEntry()
                     LocalAudioAssociationTransferOptions()
+                }
+            }
+            item(key = "home_layout") {
+                SettingsGroupCard("主页栏目") {
+                    LibraryPageLayoutEditor(LibraryPage.LOCAL, layouts.getValue(LibraryPage.LOCAL), onManageSection = { managedSection = it }) {
+                        layoutModel.save(LibraryPage.LOCAL, it)
+                    }
                 }
             }
             item(key = "filter") {
@@ -183,6 +204,11 @@ fun LocalMusicSettingsScreen(
         }
     }
 
+    managedSection?.let { section ->
+        LibrarySectionItemsSheet(LibraryPage.LOCAL, section, layouts.getValue(LibraryPage.LOCAL),
+            localLayoutCatalog(library, playlists)[section].orEmpty(),
+            onSave = { layoutModel.save(LibraryPage.LOCAL, it) }, onDismiss = { managedSection = null })
+    }
     removeTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { removeTarget = null },

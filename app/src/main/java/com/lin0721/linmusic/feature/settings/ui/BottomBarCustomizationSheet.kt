@@ -166,7 +166,7 @@ fun BottomBarCustomizationSheet(
             )
 
             Text(
-                text = "长按拖动调整顺序，可配置 2~5 个底栏项目",
+                text = "长按拖动调整顺序，可配置 ${BottomBarLayout.MIN_VISIBLE_ITEMS}~${BottomBarLayout.MAX_VISIBLE_ITEMS} 个底栏项目",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 4.dp, bottom = MelodiaSpacing.sm)
@@ -308,6 +308,7 @@ private fun BottomBarItemEditorRow(
 fun bottomBarItemIcon(item: BottomBarItem): ImageVector = when (item) {
     BottomBarItem.HOME -> Icons.Default.Home
     BottomBarItem.MUSIC -> Icons.Default.MusicNote
+    BottomBarItem.PERSONAL_LIBRARY -> Icons.Default.LibraryMusic
     BottomBarItem.SEARCH -> Icons.Default.Search
     BottomBarItem.LIBRARY -> Icons.Default.LibraryMusic
     BottomBarItem.CREATE -> Icons.Default.AddBox

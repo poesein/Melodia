@@ -78,14 +78,18 @@ import com.lin0721.linmusic.feature.localmusic.ui.components.LocalHeroHeader
 import com.lin0721.linmusic.feature.localmusic.ui.components.LocalPlayShuffleButtons
 import com.lin0721.linmusic.feature.localmusic.ui.components.LocalTrackRow
 import org.koin.androidx.compose.koinViewModel
+import com.lin0721.linmusic.feature.personallibrary.LibraryPage
+import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutViewModel
 
 private val PlaylistHeroCoverSize = 132.dp
 
 @Composable
 fun LocalPlaylistsScreen(
     navigation: LocalMusicNavigation,
-    viewModel: LocalMusicViewModel = koinViewModel()
+    viewModel: LocalMusicViewModel = koinViewModel(),
+    layoutModel: LibraryPageLayoutViewModel = koinViewModel()
 ) {
+    val layouts by layoutModel.state.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
 
@@ -116,7 +120,7 @@ fun LocalPlaylistsScreen(
                     return@LocalLibraryStateGate
                 }
                 LazyColumn(contentPadding = PaddingValues(bottom = LocalBottomOverlayInset.current + MelodiaSpacing.md)) {
-                    items(playlists, key = { it.id }) { playlist ->
+                    items(layouts.getValue(LibraryPage.LOCAL).layout.orderedItems("local_playlists", playlists) { it.id.toString() }, key = { it.id }) { playlist ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

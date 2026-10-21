@@ -30,7 +30,8 @@ class BottomBarLayoutTest {
             BottomBarItemSetting(BottomBarItem.DOWNLOADS, false),
             BottomBarItemSetting(BottomBarItem.CLOUD, false),
             BottomBarItemSetting(BottomBarItem.PROFILE, false),
-            BottomBarItemSetting(BottomBarItem.MUSIC, false)
+            BottomBarItemSetting(BottomBarItem.MUSIC, false),
+            BottomBarItemSetting(BottomBarItem.PERSONAL_LIBRARY, false)
         )
         val encoded = BottomBarLayout.encode(layout)
         assertEquals(layout, BottomBarLayout.decode(encoded))
@@ -54,7 +55,7 @@ class BottomBarLayoutTest {
     }
 
     @Test
-    fun `可见数量超过5个时自动截断至上限`() {
+    fun `可见数量超过6个时自动截断至上限`() {
         val layout = BottomBarItem.entries.map { BottomBarItemSetting(it, visible = true) }
         val normalized = BottomBarLayout.normalize(layout)
         val visibleCount = normalized.count { it.visible }
@@ -65,7 +66,7 @@ class BottomBarLayoutTest {
     fun `旧默认布局升级后音乐入口位于主页之后且默认可见`() {
         val old = "home:1,search:1,library:1,create:1,local_music:0,downloads:0,cloud:0,profile:0"
         val migrated = BottomBarLayout.decode(old)
-        assertEquals(listOf(BottomBarItem.HOME, BottomBarItem.MUSIC, BottomBarItem.SEARCH, BottomBarItem.LIBRARY, BottomBarItem.CREATE),
+        assertEquals(listOf(BottomBarItem.HOME, BottomBarItem.MUSIC, BottomBarItem.SEARCH, BottomBarItem.LIBRARY, BottomBarItem.PERSONAL_LIBRARY, BottomBarItem.CREATE),
             migrated.filter { it.visible }.map { it.item })
     }
 
@@ -73,7 +74,7 @@ class BottomBarLayoutTest {
     fun `已满五项的自定义布局迁移不替换用户选项`() {
         val old = "local_music:1,downloads:1,cloud:1,profile:1,search:1,home:0,library:0,create:0"
         val migrated = BottomBarLayout.decode(old)
-        assertEquals(listOf(BottomBarItem.LOCAL_MUSIC, BottomBarItem.DOWNLOADS, BottomBarItem.CLOUD, BottomBarItem.PROFILE, BottomBarItem.SEARCH),
+        assertEquals(listOf(BottomBarItem.LOCAL_MUSIC, BottomBarItem.DOWNLOADS, BottomBarItem.CLOUD, BottomBarItem.PROFILE, BottomBarItem.SEARCH, BottomBarItem.PERSONAL_LIBRARY),
             migrated.filter { it.visible }.map { it.item })
         assertEquals(false, migrated.first { it.item == BottomBarItem.MUSIC }.visible)
     }
@@ -89,8 +90,17 @@ class BottomBarLayoutTest {
         val old = "search:1,home:0,library:1,create:0,local_music:0,downloads:0,cloud:0,profile:0"
         val migrated = BottomBarLayout.decode(old)
         assertEquals(listOf(BottomBarItem.SEARCH, BottomBarItem.HOME, BottomBarItem.LIBRARY, BottomBarItem.CREATE, BottomBarItem.LOCAL_MUSIC, BottomBarItem.DOWNLOADS, BottomBarItem.CLOUD, BottomBarItem.PROFILE),
-            migrated.filter { it.item != BottomBarItem.MUSIC }.map { it.item })
+            migrated.filter { it.item != BottomBarItem.MUSIC && it.item != BottomBarItem.PERSONAL_LIBRARY }.map { it.item })
         assertEquals(false, migrated.first { it.item == BottomBarItem.HOME }.visible)
         assertEquals(false, migrated.first { it.item == BottomBarItem.CREATE }.visible)
+    }
+
+    @Test fun personalLibraryCanBeFirstOrHiddenWithoutLosingTheOriginalLibrary() {
+        val reordered = listOf(BottomBarItemSetting(BottomBarItem.PERSONAL_LIBRARY, true)) +
+            BottomBarLayout.DEFAULT.filterNot { it.item == BottomBarItem.PERSONAL_LIBRARY }
+        assertEquals(reordered, BottomBarLayout.decode(BottomBarLayout.encode(reordered)))
+        val hidden = reordered.map { if (it.item == BottomBarItem.PERSONAL_LIBRARY) it.copy(visible = false) else it }
+        assertEquals(hidden, BottomBarLayout.decode(BottomBarLayout.encode(hidden)))
+        assertTrue(hidden.first { it.item == BottomBarItem.LIBRARY }.visible)
     }
 }

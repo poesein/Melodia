@@ -325,7 +325,7 @@ class MelodiaNavigationStateTest {
         nav.openTab(Screen.Home)
 
         val ids = nav.liveEntryIds
-        assertEquals(9, ids.size)
+        assertEquals(10, ids.size)
     }
 
     @Test
@@ -386,7 +386,9 @@ class MelodiaNavigationStateTest {
             initialMyProfileIds = snapshot.myProfileIds,
             initialMusicStack = snapshot.musicStack,
             initialMusicIds = snapshot.musicIds,
-            initialShowMusicNewWorks = snapshot.showMusicNewWorks
+            initialShowMusicNewWorks = snapshot.showMusicNewWorks,
+            initialPersonalLibraryStack = snapshot.personalLibraryStack,
+            initialPersonalLibraryIds = snapshot.personalLibraryIds
         )
 
         assertEquals(before, restored.liveEntryIds)
@@ -411,7 +413,7 @@ class MelodiaNavigationStateTest {
             initialNextEntryId = legacy.nextEntryId
         )
 
-        assertEquals(8, restored.liveEntryIds.size)
+        assertEquals(9, restored.liveEntryIds.size)
     }
 
     @Test
@@ -493,7 +495,7 @@ class MelodiaNavigationStateTest {
         )
         val restored = restoreNavigationSnapshot(old)
         assertEquals(Screen.LocalMusic, restored.activeTab)
-        assertEquals(8, restored.liveEntryIds.size)
+        assertEquals(9, restored.liveEntryIds.size)
         restored.openTab(Screen.Music)
         assertTrue(restored.currentEntry.id > 70L)
     }

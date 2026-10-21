@@ -84,18 +84,23 @@ import com.lin0721.linmusic.feature.localmusic.ui.components.LocalSectionHeader
 import com.lin0721.linmusic.feature.localmusic.ui.components.LocalTrackRow
 import com.lin0721.linmusic.feature.localmusic.ui.playlist.LocalPlaylistCover
 import com.lin0721.linmusic.feature.localmusic.ui.playlist.NewPlaylistTile
+import com.lin0721.linmusic.feature.personallibrary.LibraryPage
+import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayout
+import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutViewModel
 import org.koin.androidx.compose.koinViewModel
 
 private const val RECENT_TRACK_COUNT = 5
-private const val SHELF_ITEM_COUNT = 10
 private val ArtistAvatarSize = 64.dp
 private val AlbumCardWidth = 108.dp
 
 @Composable
 fun LocalMusicHomeScreen(
     navigation: LocalMusicNavigation,
-    viewModel: LocalMusicViewModel = koinViewModel()
+    viewModel: LocalMusicViewModel = koinViewModel(),
+    layoutModel: LibraryPageLayoutViewModel = koinViewModel()
 ) {
+    val layouts by layoutModel.state.collectAsStateWithLifecycle()
+    val homeLayout = layouts.getValue(LibraryPage.LOCAL).layout
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val library by viewModel.library.collectAsStateWithLifecycle()
     val playingMediaId by viewModel.playingMediaId.collectAsStateWithLifecycle()
@@ -152,6 +157,7 @@ fun LocalMusicHomeScreen(
                     EmptyLibrary(onImport = { showImportSheet = true })
                 } else {
                     HomeContent(
+                        layout = homeLayout,
                         library = library,
                         playlists = playlists,
                         onCreatePlaylist = { showCreatePlaylist = true },
@@ -195,6 +201,7 @@ fun LocalMusicHomeScreen(
 
 @Composable
 private fun HomeContent(
+    layout: LibraryPageLayout,
     library: LocalLibraryIndex,
     playlists: List<LocalPlaylist>,
     onCreatePlaylist: () -> Unit,
@@ -217,98 +224,107 @@ private fun HomeContent(
             QuickEntries(library = library, navigation = navigation)
         }
 
-        item(key = "playlists_header") { LocalSectionHeader("本地歌单", onMoreClick = navigation.openPlaylists) }
-        item(key = "playlists_shelf") {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = MelodiaSpacing.md),
-                horizontalArrangement = Arrangement.spacedBy(MelodiaSpacing.sm)
-            ) {
-                item(key = "new_playlist") {
-                    Column(modifier = Modifier.width(AlbumCardWidth).pressable(MelodiaPress.Card, onClick = onCreatePlaylist)) {
-                        NewPlaylistTile(size = AlbumCardWidth)
-                        Spacer(Modifier.height(6.dp))
-                        Text("新建歌单", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
-                    }
-                }
-                items(playlists.take(SHELF_ITEM_COUNT), key = { "playlist_${it.id}" }) { playlist ->
-                    Column(modifier = Modifier.width(AlbumCardWidth).pressable(MelodiaPress.Card) { navigation.openPlaylist(playlist.id) }) {
-                        LocalPlaylistCover(tracks = playlist.tracks, size = AlbumCardWidth)
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = playlist.name,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text("${playlist.tracks.size} 首", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-
-        item(key = "recent_header") { LocalSectionHeader("最近添加", onMoreClick = navigation.openSongs) }
-        items(recentTracks.take(RECENT_TRACK_COUNT), key = { "recent_${it.uri}" }) { track ->
-            LocalTrackRow(
-                track = track,
-                subtitle = track.artist,
-                playingMediaId = playingMediaId,
-                isPlaying = isPlaying,
-                onClick = { viewModel.playTracks(recentTracks, start = track) },
-                onMoreClick = { coverUrl -> viewModel.openTrackMenu(track, recentTracks, coverUrl) }
-            )
-        }
-
-        if (library.artists.isNotEmpty()) {
-            item(key = "artists_header") { LocalSectionHeader("歌手", onMoreClick = navigation.openArtists) }
-            item(key = "artists_shelf") {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = MelodiaSpacing.md),
-                    horizontalArrangement = Arrangement.spacedBy(MelodiaSpacing.md)
-                ) {
-                    items(library.artists.take(SHELF_ITEM_COUNT), key = { it.name }) { artist ->
-                        Column(
-                            modifier = Modifier
-                                .width(ArtistAvatarSize)
-                                .pressable(MelodiaPress.Card) { navigation.openArtist(artist.name) },
-                            horizontalAlignment = Alignment.CenterHorizontally
+        layout.normalized(LibraryPage.LOCAL).sections.filter { it.visible }.forEach { section ->
+            when (section.key) {
+                "local_playlists" -> {
+                    item(key = "playlists_header") { LocalSectionHeader("本地歌单", onMoreClick = navigation.openPlaylists) }
+                    item(key = "playlists_shelf") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = MelodiaSpacing.md),
+                            horizontalArrangement = Arrangement.spacedBy(MelodiaSpacing.sm)
                         ) {
-                            LocalCover(
-                                sourceUri = artist.tracks.first().uri,
-                                size = ArtistAvatarSize,
-                                shape = CircleShape,
-                                fallbackIcon = Icons.Rounded.Person
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = artist.name,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
+                            item(key = "new_playlist") {
+                                Column(modifier = Modifier.width(AlbumCardWidth).pressable(MelodiaPress.Card, onClick = onCreatePlaylist)) {
+                                    NewPlaylistTile(size = AlbumCardWidth)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text("新建歌单", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                }
+                            }
+                            items(layout.shelfItems("local_playlists", playlists) { it.id.toString() }, key = { "playlist_${it.id}" }) { playlist ->
+                                Column(modifier = Modifier.width(AlbumCardWidth).pressable(MelodiaPress.Card) { navigation.openPlaylist(playlist.id) }) {
+                                    LocalPlaylistCover(tracks = playlist.tracks, size = AlbumCardWidth)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = playlist.name,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text("${playlist.tracks.size} 首", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-
-        if (library.knownAlbums.isNotEmpty()) {
-            item(key = "albums_header") { LocalSectionHeader("专辑", onMoreClick = navigation.openAlbums) }
-            item(key = "albums_shelf") {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = MelodiaSpacing.md),
-                    horizontalArrangement = Arrangement.spacedBy(MelodiaSpacing.sm)
-                ) {
-                    items(library.recentAlbums.take(SHELF_ITEM_COUNT), key = { it.key }) { album ->
-                        LocalAlbumCard(
-                            coverSourceUri = album.coverSourceUri,
-                            title = album.name,
-                            subtitle = album.artist,
-                            width = AlbumCardWidth,
-                            onClick = { navigation.openAlbum(album.key) }
+                "recent" -> {
+                    item(key = "recent_header") { LocalSectionHeader("最近添加", onMoreClick = navigation.openSongs) }
+                    items(recentTracks.take(RECENT_TRACK_COUNT), key = { "recent_${it.uri}" }) { track ->
+                        LocalTrackRow(
+                            track = track,
+                            subtitle = track.artist,
+                            playingMediaId = playingMediaId,
+                            isPlaying = isPlaying,
+                            onClick = { viewModel.playTracks(recentTracks, start = track) },
+                            onMoreClick = { coverUrl -> viewModel.openTrackMenu(track, recentTracks, coverUrl) }
                         )
+                    }
+                }
+                "artists" -> {
+                    if (library.artists.isNotEmpty()) {
+                        item(key = "artists_header") { LocalSectionHeader("歌手", onMoreClick = navigation.openArtists) }
+                        item(key = "artists_shelf") {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = MelodiaSpacing.md),
+                                horizontalArrangement = Arrangement.spacedBy(MelodiaSpacing.md)
+                            ) {
+                                items(layout.shelfItems("artists", library.artists) { it.name }, key = { it.name }) { artist ->
+                                    Column(
+                                        modifier = Modifier
+                                            .width(ArtistAvatarSize)
+                                            .pressable(MelodiaPress.Card) { navigation.openArtist(artist.name) },
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        LocalCover(
+                                            sourceUri = artist.tracks.first().uri,
+                                            size = ArtistAvatarSize,
+                                            shape = CircleShape,
+                                            fallbackIcon = Icons.Rounded.Person
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = artist.name,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "albums" -> {
+                    if (library.knownAlbums.isNotEmpty()) {
+                        item(key = "albums_header") { LocalSectionHeader("专辑", onMoreClick = navigation.openAlbums) }
+                        item(key = "albums_shelf") {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = MelodiaSpacing.md),
+                                horizontalArrangement = Arrangement.spacedBy(MelodiaSpacing.sm)
+                            ) {
+                                items(layout.shelfItems("albums", library.recentAlbums) { it.key }, key = { it.key }) { album ->
+                                    LocalAlbumCard(
+                                        coverSourceUri = album.coverSourceUri,
+                                        title = album.name,
+                                        subtitle = album.artist,
+                                        width = AlbumCardWidth,
+                                        onClick = { navigation.openAlbum(album.key) }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

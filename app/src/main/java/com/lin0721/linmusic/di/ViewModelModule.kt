@@ -39,6 +39,8 @@ import com.lin0721.linmusic.feature.search.ui.PlaylistCategoryViewModel
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
+import org.koin.android.ext.koin.androidContext
+import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutViewModel
 
 /**
  * Koin ViewModel 层依赖注入模块
@@ -77,6 +79,8 @@ val viewModelModule = module {
         )
     }
     viewModelOf(::PlaylistCategoryViewModel)
+    single { com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutRepository(androidContext()) }
+    viewModelOf(::LibraryPageLayoutViewModel)
     viewModelOf(::LibraryViewModel)
     viewModelOf(::PlaylistTextImportViewModel)
     viewModelOf(::RecentPlayViewModel)

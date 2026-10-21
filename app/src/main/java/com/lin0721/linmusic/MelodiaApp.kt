@@ -184,6 +184,7 @@ fun MelodiaApp() {
         val firstRoute = bottomBarLayout.firstOrNull { it.visible && it.item.isRoute }
         val rootScreen = when (firstRoute?.item) {
             BottomBarItem.MUSIC -> Screen.Music
+            BottomBarItem.PERSONAL_LIBRARY -> Screen.PersonalLibrary
             BottomBarItem.SEARCH -> Screen.Search
             BottomBarItem.LIBRARY -> Screen.Library
             BottomBarItem.LOCAL_MUSIC -> Screen.LocalMusic

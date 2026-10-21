@@ -6,6 +6,7 @@ enum class BottomBarItem(val key: String, val title: String, val isRoute: Boolea
     MUSIC("music", "音乐", true),
     SEARCH("search", "搜索", true),
     LIBRARY("library", "音乐库", true),
+    PERSONAL_LIBRARY("personal_library", "个人音乐库", true),
     CREATE("create", "创建", false),
     LOCAL_MUSIC("local_music", "本地音乐", true),
     DOWNLOADS("downloads", "下载管理", true),
@@ -28,13 +29,14 @@ data class BottomBarItemSetting(
 // 底栏布局持久化与校验逻辑：`home:1,search:1,library:1,create:1,local_music:0,...`
 object BottomBarLayout {
     const val MIN_VISIBLE_ITEMS = 2
-    const val MAX_VISIBLE_ITEMS = 5
+    const val MAX_VISIBLE_ITEMS = 6
 
     val DEFAULT: List<BottomBarItemSetting> = listOf(
         BottomBarItemSetting(BottomBarItem.HOME, true),
         BottomBarItemSetting(BottomBarItem.MUSIC, true),
         BottomBarItemSetting(BottomBarItem.SEARCH, true),
         BottomBarItemSetting(BottomBarItem.LIBRARY, true),
+        BottomBarItemSetting(BottomBarItem.PERSONAL_LIBRARY, true),
         BottomBarItemSetting(BottomBarItem.CREATE, true),
         BottomBarItemSetting(BottomBarItem.LOCAL_MUSIC, false),
         BottomBarItemSetting(BottomBarItem.DOWNLOADS, false),
@@ -60,7 +62,17 @@ object BottomBarLayout {
             val item = BottomBarItem.fromKey(parts[0].trim()) ?: return@mapNotNull null
             BottomBarItemSetting(item, visible = parts.getOrNull(1)?.trim() == "1")
         }
-        return normalize(migrateMusicEntry(parsed))
+        return normalize(migratePersonalLibraryEntry(migrateMusicEntry(parsed)))
+    }
+
+    private fun migratePersonalLibraryEntry(layout: List<BottomBarItemSetting>): List<BottomBarItemSetting> {
+        // Only introduce the new route once. An explicitly hidden entry stays hidden.
+        if (layout.any { it.item == BottomBarItem.PERSONAL_LIBRARY }) return layout
+        val migrated = layout.toMutableList()
+        val libraryIndex = migrated.indexOfFirst { it.item == BottomBarItem.LIBRARY }
+        migrated.add(if (libraryIndex >= 0) libraryIndex + 1 else migrated.size,
+            BottomBarItemSetting(BottomBarItem.PERSONAL_LIBRARY, layout.count { it.visible } < MAX_VISIBLE_ITEMS))
+        return migrated
     }
 
     private fun migrateMusicEntry(layout: List<BottomBarItemSetting>): List<BottomBarItemSetting> {
@@ -70,7 +82,7 @@ object BottomBarLayout {
         // Preserve all selected items in a full custom layout; the new entry can
         // be enabled explicitly in settings. Legacy defaults have room for it.
         migrated.add(if (homeIndex >= 0) homeIndex + 1 else 0,
-            BottomBarItemSetting(BottomBarItem.MUSIC, layout.count { it.visible } < MAX_VISIBLE_ITEMS))
+            BottomBarItemSetting(BottomBarItem.MUSIC, layout.count { it.visible } < 5))
         return migrated
     }
 
