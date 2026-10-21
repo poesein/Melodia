@@ -20,6 +20,7 @@ import com.lin0721.linmusic.feature.playlist.domain.CreatePlaylistAndAddSongUseC
 import com.lin0721.linmusic.feature.playlist.domain.TrackBatchActionsDelegate
 import com.lin0721.linmusic.feature.playlist.presentation.TrackSelection
 import com.lin0721.linmusic.feature.playlist.domain.pendingTrackIds
+import com.lin0721.linmusic.feature.playlist.domain.PlaylistDurationCalculator
 import com.lin0721.linmusic.feature.playlist.domain.withLoadedTracks
 import com.lin0721.linmusic.feature.playlist.domain.SongCollectDelegate
 import com.lin0721.linmusic.feature.playlist.domain.UpdatePlaylistCoverUseCase
@@ -89,6 +90,18 @@ class PlaylistViewModel(
 
     private val _uiState = MutableStateFlow<PlaylistUiState>(PlaylistUiState.Loading)
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
+    private val durationCalculator = PlaylistDurationCalculator { ids -> playlistRepository.loadMoreTracks(ids).first().getOrThrow() }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val totalDurationMs: StateFlow<Long?> = _uiState.map { (it as? PlaylistUiState.Success)?.playlist }
+        .distinctUntilChanged().transformLatest { detail ->
+            emit(null)
+            if (detail != null) {
+                try { emit(durationCalculator.totalFor(detail)) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { emit(null) }
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // 离线时本机没有音频的曲目，列表据此置灰；在线时恒为空
     val unplayableIds: StateFlow<Set<Long>> = combine(

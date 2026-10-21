@@ -102,6 +102,7 @@ fun PlaylistScreen(
     onNavigateToProfile: (Long) -> Unit = {}
 ) {
     val uiState      by viewModel.uiState.collectAsStateWithLifecycle()
+    val totalDurationMs by viewModel.totalDurationMs.collectAsStateWithLifecycle()
     val currentTrack by viewModel.playerManager.nowPlaying.collectAsStateWithLifecycle()
     val isPlaying by viewModel.playerManager.playWhenReady.collectAsStateWithLifecycle()
     val playMode by viewModel.playerManager.playMode.collectAsStateWithLifecycle()
@@ -546,6 +547,8 @@ fun PlaylistScreen(
                 } else {
                     PlaylistContent(
                         playlist       = state.playlist,
+                        totalDurationMs = totalDurationMs,
+                        showPlayCount = !isAlbum,
                         trackPlayCounts = state.trackPlayCounts,
                         canRemoveFromPlaylist = isOwnedPlaylist,
                         onRemoveFromPlaylist = { songId ->

@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lin0721.linmusic.LocalBottomOverlayInset
+import com.lin0721.linmusic.core.format.collectionDurationLabel
+import com.lin0721.linmusic.core.format.totalKnownDurationMs
 import com.lin0721.linmusic.core.ui.components.CreatePlaylistDialog
 import com.lin0721.linmusic.core.ui.components.EmptyState
 import com.lin0721.linmusic.core.ui.components.MelodiaButton
@@ -134,7 +136,7 @@ fun LocalPlaylistsScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "${playlist.tracks.size} 首",
+                                    text = "${playlist.tracks.size} 首歌曲 · ${collectionDurationLabel(totalKnownDurationMs(playlist.tracks.map { it.durationMs }))}",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(top = 2.dp)
@@ -300,9 +302,9 @@ private fun PlaylistHeroInfo(playlist: LocalPlaylist) {
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
             )
-            val minutes = playlist.tracks.sumOf { it.durationMs } / 60_000
+            val durationText = collectionDurationLabel(totalKnownDurationMs(playlist.tracks.map { it.durationMs }))
             Text(
-                text = listOfNotNull("本地歌单", "${playlist.tracks.size} 首", minutes.takeIf { it > 0 }?.let { "$it 分钟" })
+                text = listOf("本地歌单", "${playlist.tracks.size} 首歌曲", durationText)
                     .joinToString(" · "),
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 13.sp,

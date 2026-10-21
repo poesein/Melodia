@@ -60,6 +60,19 @@ private const val PERIODIC_STATE_SAVE_INTERVAL_MS = 3000L
 // 保留来源证明与策略代际，不能把已核验结果降成不带身份的 URL 再复用。
 private data class PrefetchedPlayback(val songId: Long, val info: SongPlaybackInfo, val token: PlaybackPolicyToken)
 
+private const val EXTRA_GAPLESS_GENERATION = "personalGaplessGeneration"
+private data class GaplessSource(
+    val mediaItem: MediaItem,
+    val token: PlaybackPolicyToken,
+    val preferredUri: String? = null,
+    val proof: PrefetchedPlayback? = null
+)
+private data class PreparedGapless(
+    val snapshot: GaplessQueueSnapshot,
+    val generation: Long,
+    val source: GaplessSource
+)
+
 // 播放门面：对外暴露播放状态与控制入口，队列、控制器、进度、持久化等职责交由协作者承担
 class PlayerManager(
     private val context: Context,
@@ -212,6 +225,15 @@ class PlayerManager(
     private var prefetchedNextUrl: PrefetchedPlayback? = null
     private var prefetchTriggeredForSongId: Long = -1L
 
+    private var gaplessJob: Job? = null
+    private var preparedGapless: PreparedGapless? = null
+    private var gaplessAttempt: GaplessQueueSnapshot? = null
+    private var gaplessGeneration = 0L
+    // Controller timeline masking and the service acknowledgement can repeat the same AUTO event.
+    // Retain the consumed generation while preparing its successor; song ID alone is insufficient
+    // because adjacent queue entries may deliberately contain the same song.
+    private var lastAdoptedGapless: Pair<Long, String>? = null
+
     private val streamCacheTriggeredSongIds = Collections.synchronizedSet(mutableSetOf<Long>())
 
     // 打卡上报用的挂钟计时：轮询到的播放位置在后台/锁屏场景下不可靠（真机验证过，间歇性追不上进度），改用挂钟时间差，不依赖控制器状态同步
@@ -249,7 +271,10 @@ class PlayerManager(
         }
 
         scope.launch {
-            settingsPreferences.crossfadeEnabled.collect { crossfadeEnabled = it }
+            settingsPreferences.crossfadeEnabled.collect {
+                if (crossfadeEnabled != it) invalidateGapless()
+                crossfadeEnabled = it
+            }
         }
         scope.launch {
             settingsPreferences.crossfadeDurationMs.collect { crossfadeDurationMs = it }
@@ -261,6 +286,27 @@ class PlayerManager(
                     sourcePolicyInitialized = true
                     if (needsReset) onSourcePolicyChanged(enabled) else strictFallbackEnabled = enabled
                 }
+            }
+        }
+
+        scope.launch {
+            combine(playbackQueue.items, playbackQueue.currentIndex, playbackQueue.playMode, playbackQueue.playContext) {
+                _, _, _, _ -> Unit
+            }.collect {
+                if (gaplessAttempt?.isCurrent(playbackQueue) == false) invalidateGapless()
+                maybePrepareGapless()
+            }
+        }
+        scope.launch {
+            localMusicApi.availabilityChanges.collect {
+                invalidateGapless()
+                maybePrepareGapless()
+            }
+        }
+        scope.launch {
+            settingsPreferences.wifiOnlyPlay.collect {
+                invalidateGapless()
+                maybePrepareGapless()
             }
         }
 
@@ -303,6 +349,7 @@ class PlayerManager(
     private fun onSourcePolicyChanged(enabled: Boolean) {
         // Invalidate first: cancelled HTTP/native work may still return after cancellation.
         sourcePolicyEpoch++
+        invalidateGapless()
         sourcePolicyInitialized = true
         strictFallbackEnabled = enabled
         val hadPendingRequest = activePlayJob?.isActive == true
@@ -342,6 +389,7 @@ class PlayerManager(
     }
 
     private fun rejectStrictPlayback() {
+        invalidateGapless()
         pendingSkipFromIndex = null
         pendingStartPosition = 0L
         pausedForPendingPlay = false
@@ -395,6 +443,8 @@ class PlayerManager(
     ) {
         if (items.isEmpty()) return
 
+        invalidateGapless()
+
         if (playContext == SimilarRoamingController.CONTEXT_ROAMING) {
             roaming.prepare()
         } else if (playContext == CONTEXT_INTELLIGENCE) {
@@ -438,6 +488,7 @@ class PlayerManager(
     // 批量插播歌曲到“下一首”播放位置
     override fun addToPlayNext(items: List<QueueItem>) {
         if (items.isEmpty()) return
+        invalidateGapless()
         if (playbackQueue.isEmpty) {
             playQueue(items, 0)
             return
@@ -493,12 +544,14 @@ class PlayerManager(
 
     override fun removeFromQueue(index: Int) {
         if (index < 0 || index >= playbackQueue.size || playbackQueue.size <= 1) return
+        invalidateGapless()
         val replayIndex = playbackQueue.removeAt(index)
         if (replayIndex >= 0) fetchUrlAndPlay(replayIndex)
         saveQueueState()
     }
 
     override fun moveInQueue(from: Int, to: Int) {
+        invalidateGapless()
         if (!playbackQueue.move(from, to)) return
         moveSaveJob?.cancel()
         moveSaveJob = scope.launch {
@@ -535,6 +588,7 @@ class PlayerManager(
     }
 
     private fun applyMode(newMode: PlayMode, currentItem: QueueItem?) {
+        invalidateGapless()
         playbackQueue.applyMode(newMode, currentItem)
         controllerHolder.setRepeatMode(newMode)
         stateStore.savePlayMode(newMode)
@@ -542,6 +596,7 @@ class PlayerManager(
     }
 
     override fun pause() {
+        invalidateGapless()
         _playWhenReady.value = false
         externalInterruptionResumeController.onExplicitUserPause()
         controllerHolder.pause()
@@ -640,6 +695,7 @@ class PlayerManager(
 
     // 清空播放队列中除当前播放歌曲外的其他歌曲，重置播放状态并同步本地持久化状态
     override fun clearQueue() {
+        invalidateGapless()
         val currentTrackItem = playbackQueue.keepOnlyCurrent()
 
         if (currentTrackItem != null) {
@@ -697,7 +753,7 @@ class PlayerManager(
         skipPreferredLocal: Boolean = false
     ) {
         val item = playbackQueue.itemAt(index) ?: return
-
+        invalidateGapless()
         activePlayJob?.cancel()
         pendingSkipFromIndex = null
         roaming.cancel()
@@ -1008,8 +1064,109 @@ class PlayerManager(
         }
     }
 
+    private fun invalidateGapless() {
+        gaplessGeneration++
+        gaplessJob?.cancel()
+        gaplessJob = null
+        preparedGapless = null
+        gaplessAttempt = null
+        controllerHolder.clearUpcomingItems()
+    }
+
+    /** Stage only one successor, close to the boundary, without changing UI/queue/current-source state. */
+    private fun maybePrepareGapless(remainingMs: Long = progress.duration.value - controllerHolder.currentPosition) {
+        if ((crossfadeEnabled && !strictFallbackEnabled) || !_playWhenReady.value ||
+            controllerHolder.playbackState != Player.STATE_READY || pendingTrack.pending != null ||
+            remainingMs !in 1L..30_000L) return
+        val snapshot = GaplessQueueSnapshot(queue.value, currentIndex.value, playMode.value, playContext.value)
+        val next = snapshot.items.getOrNull(snapshot.nextIndex) ?: return
+        if (_currentTrack.value?.mediaId != snapshot.items[snapshot.index].songId.toString()) return
+        if (gaplessAttempt == snapshot) return
+        gaplessAttempt = snapshot
+        val generation = ++gaplessGeneration
+        gaplessJob = scope.launch {
+            try {
+                val source = resolveGaplessSource(next, snapshot.context) ?: return@launch
+                if (generation != gaplessGeneration || !snapshot.isCurrent(playbackQueue) ||
+                    !isCurrentPolicy(source.token) || !_playWhenReady.value) return@launch
+                val extras = Bundle(source.mediaItem.mediaMetadata.extras ?: Bundle()).apply {
+                    putLong(EXTRA_GAPLESS_GENERATION, generation)
+                }
+                val stamped = source.mediaItem.buildUpon().setMediaMetadata(
+                    source.mediaItem.mediaMetadata.buildUpon().setExtras(extras).build()
+                ).build()
+                preparedGapless = PreparedGapless(snapshot, generation, source)
+                if (!controllerHolder.appendPreparedNext(snapshot.items[snapshot.index].songId.toString(), stamped)) {
+                    preparedGapless = null
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                // Keep the current song intact. The established end-of-track path remains the fallback.
+                AppLogger.w(TAG, "下一首预缓冲未就绪 songId=${next.songId}", error)
+            }
+        }
+    }
+
+    private suspend fun resolveGaplessSource(item: QueueItem, playContext: String?): GaplessSource? {
+        val token = policyToken()
+        val preferred = if (item.localUri == null) preferredLocalUri(item) else null
+        val localUri = item.localUri ?: preferred
+        if (localUri != null) {
+            if (token.strict && !StrictPlaybackPolicy.isLocalFile(localUri)) return null
+            if (!StrictPlaybackPolicy.isLocalFile(localUri) && (!onlineState.isOnline() || !networkGuard.canPrefetch())) return null
+            val cover = localMusicApi.coverUriFor(android.net.Uri.parse(localUri))?.toString() ?: item.coverUrl
+            return GaplessSource(item.toMediaItem(localUri, playContext, cover), token, preferred)
+        }
+        val downloaded = downloadPreferences.findVerifiedRecord(item.songId)
+        if (downloaded != null) {
+            if (token.strict && !StrictPlaybackPolicy.isLocalFile(downloaded.mediaStoreUri)) return null
+            val cover = localMusicApi.coverUriFor(android.net.Uri.parse(downloaded.mediaStoreUri))?.toString() ?: item.coverUrl
+            return GaplessSource(item.toMediaItem(downloaded.mediaStoreUri, playContext, cover), token)
+        }
+        if (!onlineState.isOnline()) {
+            val key = findOfflineCacheKey(item.songId) ?: return null
+            return GaplessSource(item.toOfflineCachedMediaItem(key, playContext), token)
+        }
+        if (!networkGuard.canPrefetch()) return null
+        val cached = prefetchedNextUrl?.takeIf {
+            it.songId == item.songId && StrictPlaybackPolicy.isCurrent(it.token, token.epoch, token.strict)
+        }
+        val info = cached?.info ?: repository.getSongPlaybackInfo(item.songId).first().getOrNull() ?: return null
+        if (info.trialFallback || !StrictPlaybackPolicy.allowsInfo(token.strict, info)) return null
+        val proof = PrefetchedPlayback(item.songId, info, token)
+        if (!isCurrentPolicy(token)) return null
+        prefetchedNextUrl = proof // If native preparation loses the race, reuse the verified URL on ENDED.
+        return GaplessSource(item.toMediaItem(info.url, playContext), token, proof = proof)
+    }
+
+    private fun adoptGapless(mediaItem: MediaItem): Boolean {
+        val prepared = preparedGapless ?: return false
+        if (mediaItem.mediaMetadata.extras?.getLong(EXTRA_GAPLESS_GENERATION) != prepared.generation ||
+            !prepared.snapshot.isCurrent(playbackQueue) ||
+            !StrictPlaybackPolicy.isCurrent(prepared.source.token, sourcePolicyEpoch, strictFallbackEnabled) ||
+            mediaItem.mediaId != prepared.snapshot.items[prepared.snapshot.nextIndex].songId.toString()) return false
+        preparedGapless = null
+        gaplessAttempt = null
+        gaplessJob = null
+        lastAdoptedGapless = prepared.generation to mediaItem.mediaId
+        playbackQueue.setCurrentIndex(prepared.snapshot.nextIndex)
+        val songId = prepared.snapshot.items[prepared.snapshot.nextIndex].songId
+        preferredLocalSource = prepared.source.preferredUri?.let { songId to it }
+        acceptedNetworkPlayback = prepared.source.proof
+        requestedSource = prepared.source.mediaItem.localConfiguration?.uri?.toString()?.let { songId to it }
+        publishPlaybackLevel(songId, prepared.source.proof?.info?.level)
+        prefetchedNextUrl = null
+        prefetchTriggeredForSongId = -1L
+        saveQueueState()
+        return true
+    }
+
     // 临近播完时提前预取下一首链接，供 playNextOnEnded 命中缓存零等待衔接
     private fun maybePrefetchNextTrackUrl(remainingMs: Long) {
+        if (!crossfadeEnabled || strictFallbackEnabled) {
+            maybePrepareGapless(remainingMs)
+            return
+        }
         if (remainingMs > CrossfadePolicy.prefetchWindowMs(crossfadeEnabled)) return
         if (playbackQueue.playMode.value == PlayMode.SINGLE_LOOP) return
         val nextItem = playbackQueue.nextItemByMode() ?: return
@@ -1193,6 +1350,7 @@ class PlayerManager(
     }
 
     fun release() {
+        invalidateGapless()
         reportPlayedTrack()
         networkGuard.unregister()
         sleepTimer.cancel()
@@ -1285,6 +1443,7 @@ class PlayerManager(
 
     // 镜像 ExoPlayer 真实的 playWhenReady：覆盖手动置位覆盖不到的场景（音频焦点丢失、耳机拔出等系统触发的暂停）
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        if (!playWhenReady) invalidateGapless()
         if (playWhenReady) pausedForPendingPlay = false else if (pausedForPendingPlay) return
         _playWhenReady.value = playWhenReady
     }
@@ -1299,6 +1458,7 @@ class PlayerManager(
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         updatePlaybackStateAndSyncClock(isPlaying)
         if (isPlaying) {
+            scope.launch { maybePrepareGapless() }
             consecutiveErrors = 0
             streamErrorRecoverySongId = null
             trackLastPauseElapsedMs?.let { trackPausedAccumMs += SystemClock.elapsedRealtime() - it }
@@ -1322,12 +1482,29 @@ class PlayerManager(
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        val nativeNext = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
+            mediaItem?.mediaMetadata?.extras?.containsKey(EXTRA_GAPLESS_GENERATION) == true
+        if (nativeNext && lastAdoptedGapless ==
+            (mediaItem!!.mediaMetadata.extras!!.getLong(EXTRA_GAPLESS_GENERATION) to mediaItem.mediaId) &&
+            _currentTrack.value?.mediaId == mediaItem.mediaId &&
+            playbackQueue.currentItem()?.songId?.toString() == mediaItem.mediaId) return
+        val canonicalNext = if (nativeNext) preparedGapless?.source?.mediaItem else null
+        if (nativeNext && !adoptGapless(mediaItem!!)) {
+            // A queue/policy edit can race with the service's AUTO event. Never adopt a stale source.
+            controllerHolder.pause()
+            invalidateGapless()
+            if (activePlayJob?.isActive != true) fetchUrlAndPlay(playbackQueue.nextIndex())
+            return
+        }
+        // The session decorates titles with Bluetooth lyrics. Its AUTO callback can still carry
+        // the outgoing song's decoration; publish the resolved successor's original metadata.
+        val currentItem = canonicalNext ?: mediaItem
         lyricRenderClock.reset(controllerHolder.currentPosition, SystemClock.elapsedRealtime(), _isPlaying.value)
         AppLogger.i(TAG, "切歌: songId=${mediaItem?.mediaId} reason=${transitionReasonName(reason)}")
         reportPlayedTrack()
         resetTrackTiming()
         // 同一首歌之后再次播放时仍需能触发自动淡化
-        val newSongId = mediaItem?.mediaId?.toLongOrNull()
+        val newSongId = currentItem?.mediaId?.toLongOrNull()
         if (failedPreferredLocalSource?.first != newSongId) failedPreferredLocalSource = null
         if (newSongId != autoCrossfadeTriggeredSongId) {
             autoCrossfadeTriggeredSongId = -1L
@@ -1338,13 +1515,13 @@ class PlayerManager(
             autoCrossfadeScheduledSongId = -1L
         }
         if (pendingStartOffset?.first != newSongId) pendingStartOffset = null
-        setCurrentTrack(mediaItem)
-        if (mediaItem != null || !clearingForSourcePolicy) {
-            playbackQueue.setPlayContext(mediaItem?.mediaMetadata?.extras?.getString("playContext"))
+        setCurrentTrack(currentItem)
+        if (currentItem != null || !clearingForSourcePolicy) {
+            playbackQueue.setPlayContext(currentItem?.mediaMetadata?.extras?.getString("playContext"))
         }
-        if (mediaItem != null) clearingForSourcePolicy = false
-        if (mediaItem != null) {
-            reportStartPlay(mediaItem)
+        if (currentItem != null) clearingForSourcePolicy = false
+        if (currentItem != null) {
+            reportStartPlay(currentItem)
             // 切歌过渡时：若存在断点续播位置则恢复断点，否则重置为 0
             if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
                 if (pendingStartPosition > 0L) {
@@ -1356,6 +1533,11 @@ class PlayerManager(
             }
             progress.updateDurationFromController()
             saveState()
+        }
+        if (nativeNext) scope.launch {
+            controllerHolder.trimConsumedItems()
+            roaming.prefetchOnPlay(playbackQueue.currentItem()?.songId ?: return@launch, playbackQueue.currentIndex.value)
+            maybePrepareGapless()
         }
     }
 
@@ -1369,6 +1551,7 @@ class PlayerManager(
         if (playbackState == Player.STATE_READY) {
             progress.updateDurationFromController()
             playbackQueue.nextItemByMode()?.let { coverPreloader.preload(it.coverUrl) }
+            scope.launch { maybePrepareGapless() }
         }
         // 单曲循环由 ExoPlayer REPEAT_MODE_ONE 处理，不会到达 STATE_ENDED
         if (playbackState == Player.STATE_ENDED && playbackQueue.playMode.value != PlayMode.SINGLE_LOOP) {

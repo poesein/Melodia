@@ -61,6 +61,8 @@ import com.lin0721.linmusic.core.model.PlaylistDetail
 @Composable
 fun PlaylistHeaderItem(
     playlist: PlaylistDetail,
+    totalDurationMs: Long? = null,
+    showPlayCount: Boolean = true,
     coverSize: Dp,
     coverAlpha: Float,
     progress: Float,
@@ -238,10 +240,11 @@ fun PlaylistHeaderItem(
                         }
                     }
                     Spacer(Modifier.height(MelodiaSpacing.xs))
-                    val playCountText = if (playlist.playCount > 0) " • 播放 ${formatPlayCount(playlist.playCount)} 次" else ""
+                    val playCountText = if (showPlayCount && playlist.playCount > 0) " · 播放 ${formatPlayCount(playlist.playCount)} 次" else ""
                     // trackIds 是完整曲目表，tracks 分页加载中可能少于真实总数；trackIds 为空（专辑/日推等场景）才退回 tracks.size
                     val totalTrackCount = if (playlist.trackIds.isNotEmpty()) playlist.trackIds.size else playlist.tracks.size
-                    Text("$totalTrackCount 首歌曲$playCountText", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    val durationText = com.lin0721.linmusic.core.format.collectionDurationLabel(totalDurationMs)
+                    Text("$totalTrackCount 首歌曲 · $durationText$playCountText", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
 
                 if (playlist.id != -1L && playlist.id != -2L) {

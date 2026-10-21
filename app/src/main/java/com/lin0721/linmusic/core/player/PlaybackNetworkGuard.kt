@@ -108,4 +108,7 @@ class PlaybackNetworkGuard(
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
         }.onFailure { AppLogger.w(TAG, "移动网络检测异常", it) }.getOrDefault(false)
     }
+
+    // Silent preparation obeys the same mobile-data policy without interrupting the current song.
+    suspend fun canPrefetch(): Boolean = !(settingsPreferences.wifiOnlyPlay.first() && isMobileNetwork())
 }

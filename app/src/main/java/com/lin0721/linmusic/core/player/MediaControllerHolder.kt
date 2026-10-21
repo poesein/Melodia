@@ -87,6 +87,13 @@ class MediaControllerHolder(private val context: Context) {
         controller?.play()
     }
 
+    fun appendPreparedNext(expectedId: String, next: MediaItem): Boolean =
+        controller?.let { GaplessPlaylist.append(it, expectedId, next) } ?: false
+
+    fun clearUpcomingItems() { controller?.let(GaplessPlaylist::clearUpcoming) }
+
+    fun trimConsumedItems() { controller?.let(GaplessPlaylist::trimConsumed) }
+
     fun pause() {
         controller?.pause()
     }

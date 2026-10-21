@@ -178,11 +178,11 @@ class MelodiaPlaybackService : MediaSessionService() {
             primary = ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setHandleAudioBecomingNoisy(true)
-                .build(),
+                .build().apply { setPreloadConfiguration(ExoPlayer.PreloadConfiguration(5_000_000L)) },
             secondary = ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setHandleAudioBecomingNoisy(true)
-                .build(),
+                .build().apply { setPreloadConfiguration(ExoPlayer.PreloadConfiguration(5_000_000L)) },
             audioAttributes = audioAttributes
         )
         sessionPlayer.setMetadataTransformer { base ->

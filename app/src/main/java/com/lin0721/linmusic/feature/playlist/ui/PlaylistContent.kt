@@ -53,6 +53,8 @@ private val COVER_MAX_SIZE = 260.dp
 @Composable
 fun PlaylistContent(
     playlist: PlaylistDetail,
+    totalDurationMs: Long? = null,
+    showPlayCount: Boolean = true,
     currentTrackId: String?,
     isPlaying: Boolean,
     likedSongIds: Set<Long>,
@@ -253,6 +255,8 @@ fun PlaylistContent(
                     ) {
                         PlaylistHeaderItem(
                             playlist            = playlist,
+                            totalDurationMs     = totalDurationMs,
+                            showPlayCount       = showPlayCount,
                             coverSize           = coverSize,
                             coverAlpha          = coverAlpha,
                             progress            = progress,

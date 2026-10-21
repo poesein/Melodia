@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lin0721.linmusic.LocalBottomOverlayInset
+import com.lin0721.linmusic.core.format.collectionDurationLabel
+import com.lin0721.linmusic.core.format.totalKnownDurationMs
 import com.lin0721.linmusic.core.ui.components.EmptyState
 import com.lin0721.linmusic.core.ui.components.MelodiaIconButton
 import com.lin0721.linmusic.core.ui.components.SecondaryScreenScaffold
@@ -249,7 +251,7 @@ fun LocalAlbumScreen(
                                         }
                                 )
                                 Text(
-                                    text = albumMeta(album, withDuration = true),
+                                    text = albumMeta(album),
                                     color = Color.White.copy(alpha = 0.6f),
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(top = 2.dp)
@@ -412,8 +414,8 @@ private fun MissingContent(title: String, onBack: () -> Unit) {
     }
 }
 
-private fun albumMeta(album: LocalAlbum, withDuration: Boolean = false): String = listOfNotNull(
+private fun albumMeta(album: LocalAlbum): String = listOfNotNull(
     album.year?.toString(),
-    "${album.tracks.size} 首",
-    album.totalDurationMs.takeIf { withDuration && it > 0 }?.let { "${(it / 60_000).coerceAtLeast(1)} 分钟" }
+    "${album.tracks.size} 首歌曲",
+    collectionDurationLabel(totalKnownDurationMs(album.tracks.map { it.durationMs }))
 ).joinToString(" · ")
