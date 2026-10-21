@@ -21,14 +21,19 @@ class TrackEdgesTest {
     @Test
     fun `有效结尾为最后一个有声窗口末尾`() {
         val w = windows(-20.0, -30.0, -44.0, -60.0, -80.0, fromMs = 200_000L)
-        assertEquals(200_300L, TrackEdges.effectiveEndMs(w))
+        assertEquals(200_060L, TrackEdges.effectiveEndMs(w))
     }
 
     @Test
     fun `有效开头为第一个有声窗口并前留一个窗口`() {
         val w = windows(-90.0, -70.0, -50.0, -30.0, -10.0)
-        assertEquals(200L, TrackEdges.effectiveStartMs(w))
+        assertEquals(20L, TrackEdges.effectiveStartMs(w))
         assertEquals(0L, TrackEdges.effectiveStartMs(windows(-10.0)))
+    }
+
+    @Test fun `quiet music is retained instead of mistaken for silence`() {
+        assertEquals(20L, TrackEdges.effectiveEndMs(windows(-55.0, -80.0)))
+        assertEquals(0L, TrackEdges.effectiveStartMs(windows(-55.0, -30.0)))
     }
 
     @Test

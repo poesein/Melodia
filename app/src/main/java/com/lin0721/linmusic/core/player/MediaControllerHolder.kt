@@ -90,7 +90,24 @@ class MediaControllerHolder(private val context: Context) {
     fun appendPreparedNext(expectedId: String, next: MediaItem): Boolean =
         controller?.let { GaplessPlaylist.append(it, expectedId, next) } ?: false
 
-    fun clearUpcomingItems() { controller?.let(GaplessPlaylist::clearUpcoming) }
+    fun clearUpcomingItems() {
+        controller?.sendCustomCommand(SessionCommand(TransitionCommands.CANCEL, Bundle()), Bundle())
+        controller?.let(GaplessPlaylist::clearUpcoming)
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    fun stageVerifiedTransition(expectedId: String, generation: Long, item: MediaItem,
+        triggerMs: Long, fadeMs: Long, startMs: Long, strict: Boolean) {
+        controller?.sendCustomCommand(SessionCommand(TransitionCommands.STAGE, Bundle()), Bundle().apply {
+            putString(TransitionCommands.EXPECTED_ID, expectedId)
+            putLong(TransitionCommands.GENERATION, generation)
+            putBundle(TransitionCommands.ITEM, item.toBundleIncludeLocalConfiguration())
+            putLong(TransitionCommands.TRIGGER_MS, triggerMs)
+            putLong(TransitionCommands.FADE_MS, fadeMs)
+            putLong(TransitionCommands.START_MS, startMs)
+            putBoolean(TransitionCommands.STRICT, strict)
+        })
+    }
 
     fun trimConsumedItems() { controller?.let(GaplessPlaylist::trimConsumed) }
 

@@ -48,6 +48,21 @@ class CrossfadePlayer(
     private val active: ExoPlayer
         get() = if (player === secondary) secondary else primary
 
+    private val preparedCrossfade = PreparedCrossfade(handler, { active }, { other(active) },
+        { outgoing == null && pendingIncoming == null }) { incoming, fadeMs ->
+        pendingIncoming = incoming
+        pendingFadeMs = fadeMs
+        incoming.playWhenReady = true
+        if (fadeMs > 0 && incoming.playbackState == Player.STATE_READY) onIncomingReady(incoming)
+        else completePendingImmediately()
+    }
+
+    internal fun stageVerifiedTransition(expectedId: String, generation: Long, item: MediaItem,
+        triggerMs: Long, fadeMs: Long, startMs: Long): Boolean =
+        preparedCrossfade.stage(expectedId, generation, item, triggerMs, fadeMs, startMs)
+
+    internal fun cancelVerifiedTransition() = preparedCrossfade.cancel()
+
     // 逐字歌词读取当前接管播放的 ExoPlayer，切换两台播放器时自动跟随。
     // 与其余 Player API 一样，只能从 applicationLooper 所在线程调用。
     internal fun currentPositionSample(): PlaybackPositionSample? = active.run {
@@ -131,6 +146,7 @@ class CrossfadePlayer(
         startIndex: Int,
         startPositionMs: Long
     ): ListenableFuture<*> {
+        preparedCrossfade.cancel()
         val extras = mediaItems.getOrNull(startIndex.coerceAtLeast(0))?.mediaMetadata?.extras
         val fadeMs = extras?.getLong(CrossfadePolicy.EXTRA_CROSSFADE_MS, 0L) ?: 0L
         val startOffsetMs = extras?.getLong(CrossfadePolicy.EXTRA_CROSSFADE_START_MS, 0L) ?: 0L
@@ -166,6 +182,7 @@ class CrossfadePlayer(
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
         if (!playWhenReady) {
+            preparedCrossfade.cancel()
             completePendingImmediately()
             releaseOutgoing()
         }
@@ -173,6 +190,7 @@ class CrossfadePlayer(
     }
 
     override fun handleStop(): ListenableFuture<*> {
+        preparedCrossfade.cancel()
         completePendingImmediately()
         releaseOutgoing()
         return super.handleStop()
@@ -184,6 +202,7 @@ class CrossfadePlayer(
     }
 
     override fun handleRelease(): ListenableFuture<*> {
+        preparedCrossfade.cancel()
         handler.removeCallbacksAndMessages(null)
         pendingFuture?.set(Unit)
         pendingFuture = null
@@ -301,6 +320,7 @@ class CrossfadePlayer(
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // 音频焦点丢失等系统暂停只作用于当前播放器：淡出方同步停掉，缓冲中的新歌接管后保持暂停
             if (playWhenReady || active.playWhenReady) return
+            preparedCrossfade.cancel()
             completePendingImmediately(playWhenReady = false)
             releaseOutgoing()
         }

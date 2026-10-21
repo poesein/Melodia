@@ -52,8 +52,9 @@ class SettingsPreferences(
         private val KEY_RESUME_AFTER_EXTERNAL_INTERRUPTION = booleanPreferencesKey("resume_after_external_interruption")
         // 切歌交叉淡化，默认 false
         private val KEY_CROSSFADE_ENABLED = booleanPreferencesKey("crossfade_enabled")
-        // 自动切歌交叉淡化时长 (ms)，默认 3000
+        // 平滑衔接重叠时长 (ms)，默认 200；沿用旧键保留用户原来的设置
         private val KEY_CROSSFADE_DURATION_MS = intPreferencesKey("crossfade_duration_ms")
+        private val KEY_CROSSFADE_TRIM_SILENCE = booleanPreferencesKey("crossfade_trim_silence")
         // 默认播放顺序，默认 "loop" (列表循环)
         // 仅 Wi-Fi 网络下联网播放，默认 false
         private val KEY_WIFI_ONLY_PLAY = booleanPreferencesKey("wifi_only_play")
@@ -300,6 +301,11 @@ class SettingsPreferences(
         dataStore.edit { prefs ->
             prefs[KEY_CROSSFADE_DURATION_MS] = CrossfadePolicy.normalizeDurationMs(durationMs)
         }
+    }
+
+    val crossfadeTrimSilence: Flow<Boolean> = dataStore.data.map { it[KEY_CROSSFADE_TRIM_SILENCE] ?: true }
+    suspend fun saveCrossfadeTrimSilence(enabled: Boolean) {
+        dataStore.edit { it[KEY_CROSSFADE_TRIM_SILENCE] = enabled }
     }
 
     // 仅 Wi-Fi 网络下联网播放 Flow

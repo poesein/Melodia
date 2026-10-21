@@ -37,13 +37,17 @@ class GaplessPlaybackTest {
     private val context: Context get() = instrumentation.targetContext
     private fun main(block: () -> Unit) = instrumentation.runOnMainSync(block)
 
-    private fun tone(name: String): File {
+    private fun tone(name: String, silentEdges: Boolean = false): File {
         val samples = 48_000 * 2
         val data = ByteBuffer.allocate(44 + samples * 2).order(ByteOrder.LITTLE_ENDIAN)
         data.put("RIFF".toByteArray()).putInt(36 + samples * 2).put("WAVEfmt ".toByteArray())
         data.putInt(16).putShort(1).putShort(1).putInt(48_000).putInt(96_000).putShort(2).putShort(16)
         data.put("data".toByteArray()).putInt(samples * 2)
-        repeat(samples) { data.putShort((kotlin.math.sin(it * 2.0 * Math.PI * 440 / 48_000) * 4000).toInt().toShort()) }
+        repeat(samples) {
+            val value = if (silentEdges && (it < 19_200 || it >= 76_800)) 0 else
+                (kotlin.math.sin(it * 2.0 * Math.PI * 440 / 48_000) * 4000).toInt()
+            data.putShort(value.toShort())
+        }
         return File(context.cacheDir, name).apply { writeBytes(data.array()) }
     }
     private fun item(id: Int, file: File) = MediaItem.Builder().setMediaId(id.toString()).setUri(file.toURI().toString()).build()
@@ -132,8 +136,12 @@ class GaplessPlaybackTest {
         } finally { main { player.release() }; file.delete() }
     }
 
-    @Test fun managerAndMediaSessionAdvanceAndWrapLocalQueueInStrictMode() = runBlocking {
-        val file = tone("gapless-manager.wav")
+    @Test fun managerAndMediaSessionAdvanceAndWrapLocalQueueInStrictMode() = exerciseManager(smooth = false)
+    @Test fun preparedSmoothModeAdvancesAndWrapsInStrictMode() = exerciseManager(smooth = true)
+    @Test fun smoothLocalSilenceTrimKeepsSongProgressAlignedInStrictMode() = exerciseManager(smooth = true, trim = true)
+
+    private fun exerciseManager(smooth: Boolean, trim: Boolean = false) = runBlocking {
+        val file = tone("gapless-manager.wav", silentEdges = trim)
         val koin = GlobalContext.get()
         val manager = koin.get<PlayerManager>()
         val settings = koin.get<SettingsPreferences>()
@@ -141,6 +149,8 @@ class GaplessPlaybackTest {
         val previousFade = settings.crossfadeEnabled.first()
         val previousAutoNext = settings.autoPlayNext.first()
         val previousStrict = sources.strictFallbackEnabled.first()
+        val previousDuration = settings.crossfadeDurationMs.first()
+        val previousTrim = settings.crossfadeTrimSilence.first()
         withContext(Dispatchers.Main) { manager.awaitQueueRestored(); manager.initController() }
         val oldQueue = manager.queue.value
         val oldIndex = manager.currentIndex.value
@@ -157,9 +167,15 @@ class GaplessPlaybackTest {
         }
         val observer = withContext(Dispatchers.IO) { observerFuture.get(5, TimeUnit.SECONDS) }
         withContext(Dispatchers.Main) {
+            var lastId: String? = null
             observer.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
-                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) autoTransitions.trySend(item?.mediaId.orEmpty())
+                    val id = item?.mediaId ?: return
+                    if (!id.startsWith("-92000") || id == lastId) return
+                    val previous = lastId
+                    lastId = id
+                    if (previous != null && (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                            (smooth && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED))) autoTransitions.trySend(id)
                 }
                 override fun onPlaybackStateChanged(state: Int) {
                     if (observer.currentMediaItem?.mediaId?.startsWith("-92000") != true) return
@@ -169,7 +185,9 @@ class GaplessPlaybackTest {
             })
         }
         try {
-            settings.saveCrossfadeEnabled(false)
+            settings.saveCrossfadeEnabled(smooth)
+            settings.saveCrossfadeDurationMs(200)
+            settings.saveCrossfadeTrimSilence(trim)
             settings.saveAutoPlayNext(false)
             sources.saveStrictFallbackEnabled(true)
             val items = (1L..3L).map { n -> QueueItem(-920_000L - n, "Gapless $n", "Test", "", localUri = file.toURI().toString()) }
@@ -192,6 +210,7 @@ class GaplessPlaybackTest {
                         assertEquals(items[index].title, manager.currentTrack.value?.mediaMetadata?.title?.toString())
                         assertEquals(items[index].artist, manager.currentTrack.value?.mediaMetadata?.artist?.toString())
                         assertEquals(items[index].title, manager.nowPlaying.value?.title)
+                        if (trim) assertTrue("Lyrics/progress must include the skipped local head silence", manager.currentPosition.value >= 300L)
                     }
                 }
                 assertTrue("The session rebuffered or ended between tracks: $bufferingAfterReady", bufferingAfterReady.isEmpty())
@@ -200,6 +219,8 @@ class GaplessPlaybackTest {
             withContext(Dispatchers.Main) { observer.release(); manager.pause() }
             autoTransitions.close()
             settings.saveCrossfadeEnabled(previousFade)
+            settings.saveCrossfadeDurationMs(previousDuration)
+            settings.saveCrossfadeTrimSilence(previousTrim)
             settings.saveAutoPlayNext(previousAutoNext)
             sources.saveStrictFallbackEnabled(previousStrict)
             withContext(Dispatchers.Main) {

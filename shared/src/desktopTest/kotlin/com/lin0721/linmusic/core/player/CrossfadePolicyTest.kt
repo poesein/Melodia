@@ -8,10 +8,24 @@ class CrossfadePolicyTest {
     @Test
     fun `时长按步进取整并截断到上下限`() {
         assertEquals(3000, CrossfadePolicy.normalizeDurationMs(3000))
-        assertEquals(3000, CrossfadePolicy.normalizeDurationMs(3200))
-        assertEquals(3500, CrossfadePolicy.normalizeDurationMs(3300))
-        assertEquals(500, CrossfadePolicy.normalizeDurationMs(0))
+        assertEquals(3200, CrossfadePolicy.normalizeDurationMs(3200))
+        assertEquals(3300, CrossfadePolicy.normalizeDurationMs(3300))
+        assertEquals(50, CrossfadePolicy.normalizeDurationMs(0))
         assertEquals(12_000, CrossfadePolicy.normalizeDurationMs(60_000))
+    }
+
+    @Test fun `precise short overlap and invalid input`() {
+        assertEquals(200, CrossfadePolicy.DEFAULT_DURATION_MS)
+        assertEquals(200, CrossfadePolicy.parseSeconds("0.2"))
+        assertEquals(50, CrossfadePolicy.parseSeconds("0,05"))
+        assertEquals(12_000, CrossfadePolicy.parseSeconds("12"))
+        assertEquals(null, CrossfadePolicy.parseSeconds("0"))
+        assertEquals(null, CrossfadePolicy.parseSeconds("NaN"))
+        assertEquals(null, CrossfadePolicy.parseSeconds("Infinity"))
+        assertEquals(null, CrossfadePolicy.parseSeconds("-1"))
+        assertEquals(null, CrossfadePolicy.parseSeconds("13"))
+        assertEquals("0.20 秒", CrossfadePolicy.durationLabel(200))
+        assertEquals("0.05 秒", CrossfadePolicy.durationLabel(50))
     }
 
     @Test

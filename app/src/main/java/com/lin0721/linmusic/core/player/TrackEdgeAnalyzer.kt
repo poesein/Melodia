@@ -24,16 +24,16 @@ private const val HEAD_SPAN_MS = 6_000L
 private const val ANALYSIS_TIMEOUT_MS = 20_000L
 private const val CODEC_TIMEOUT_US = 10_000L
 
-// 100ms 窗口的响度
+// 短窗口仅用于用户选择的平滑衔接，原始无缝模式不分析或裁剪录音。
 data class LoudnessWindow(val startMs: Long, val dbfs: Double)
 
 // 首尾有效位置判定，与解码解耦便于单测
 object TrackEdges {
-    const val WINDOW_MS = 100L
-    const val AUDIBLE_DBFS = -45.0
+    const val WINDOW_MS = 20L
+    const val AUDIBLE_DBFS = -60.0
 
     // 起音前留一个窗口，避免切掉起音
-    private const val HEAD_PADDING_MS = 100L
+    private const val HEAD_PADDING_MS = 20L
 
     fun dbfs(sumSquares: Double, sampleCount: Long): Double {
         if (sampleCount <= 0L || sumSquares <= 0.0) return Double.NEGATIVE_INFINITY

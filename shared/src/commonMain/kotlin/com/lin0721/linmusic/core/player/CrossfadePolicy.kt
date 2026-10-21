@@ -10,15 +10,26 @@ object CrossfadePolicy {
     const val EXTRA_CROSSFADE_MS = "crossfadeMs"
     const val EXTRA_CROSSFADE_START_MS = "crossfadeStartMs"
 
-    const val MIN_DURATION_MS = 500
+    const val MIN_DURATION_MS = 50
     const val MAX_DURATION_MS = 12_000
-    const val DURATION_STEP_MS = 500
-    const val DEFAULT_DURATION_MS = 3000
+    const val DURATION_STEP_MS = 50
+    const val DEFAULT_DURATION_MS = 200
 
     private const val BASE_PREFETCH_WINDOW_MS = 8000L
 
     // 开启交叉时提前到这个窗口预取下一首并分析首尾
     const val ANALYSIS_WINDOW_MS = 35_000L
+
+    fun parseSeconds(text: String): Int? {
+        val seconds = text.trim().replace(',', '.').toDoubleOrNull() ?: return null
+        if (!seconds.isFinite() || seconds < MIN_DURATION_MS / 1000.0 || seconds > MAX_DURATION_MS / 1000.0) return null
+        return normalizeDurationMs(kotlin.math.round(seconds * 1000).toInt())
+    }
+
+    fun durationLabel(ms: Int): String {
+        val value = normalizeDurationMs(ms)
+        return "${value / 1000}.${((value % 1000) / 10).toString().padStart(2, '0')} 秒"
+    }
 
     fun normalizeDurationMs(durationMs: Int): Int {
         val clamped = durationMs.coerceIn(MIN_DURATION_MS, MAX_DURATION_MS)

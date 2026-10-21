@@ -79,6 +79,7 @@ fun PlaybackDownloadSettingsView(viewModel: SettingsViewModel) {
     val resumeAfterExternalInterruption by viewModel.resumeAfterExternalInterruption.collectAsStateWithLifecycle()
     val crossfadeEnabled by viewModel.crossfadeEnabled.collectAsStateWithLifecycle()
     val crossfadeDurationMs by viewModel.crossfadeDurationMs.collectAsStateWithLifecycle()
+    val crossfadeTrimSilence by viewModel.crossfadeTrimSilence.collectAsStateWithLifecycle()
     val streamCacheEnabled by viewModel.streamCacheEnabled.collectAsStateWithLifecycle()
     val preferLocalAudio by viewModel.preferLocalAudio.collectAsStateWithLifecycle()
     val automaticallyMatchLocalAudio by viewModel.automaticallyMatchLocalAudio.collectAsStateWithLifecycle()
@@ -146,41 +147,12 @@ fun PlaybackDownloadSettingsView(viewModel: SettingsViewModel) {
                     onCheckedChange = { viewModel.updateResumeAfterExternalInterruption(it) }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                SettingsSwitchRow(
-                    title = "切歌淡入淡出",
-                    subtitle = "歌曲临近结束时与下一首交叠过渡，手动切歌不触发",
-                    checked = crossfadeEnabled,
-                    onCheckedChange = { viewModel.updateCrossfadeEnabled(it) }
+                PlaybackTransitionSettings(
+                    smooth = crossfadeEnabled, durationMs = crossfadeDurationMs, trimSilence = crossfadeTrimSilence,
+                    onModeChange = viewModel::updateCrossfadeEnabled,
+                    onDurationChange = viewModel::updateCrossfadeDurationMs,
+                    onTrimChange = viewModel::updateCrossfadeTrimSilence
                 )
-                if (crossfadeEnabled) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("过渡时长", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
-                            Text(
-                                text = "${crossfadeDurationMs} ms",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        LyricCapsuleSlider(
-                            value = crossfadeDurationMs,
-                            onValueChange = { viewModel.updateCrossfadeDurationMs(CrossfadePolicy.normalizeDurationMs(it)) },
-                            valueRange = CrossfadePolicy.MIN_DURATION_MS.toFloat()..CrossfadePolicy.MAX_DURATION_MS.toFloat(),
-                            startLabel = "短",
-                            endLabel = "长"
-                        )
-                    }
-                }
             }
         }
         item {

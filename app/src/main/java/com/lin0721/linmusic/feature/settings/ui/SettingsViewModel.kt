@@ -110,6 +110,7 @@ class SettingsViewModel(
     val crossfadeEnabled = settingsPreferences.crossfadeEnabled.asState(false)
 
     val crossfadeDurationMs = settingsPreferences.crossfadeDurationMs.asState(CrossfadePolicy.DEFAULT_DURATION_MS)
+    val crossfadeTrimSilence = settingsPreferences.crossfadeTrimSilence.asState(true)
 
     val wifiOnlyPlay = settingsPreferences.wifiOnlyPlay.asState(false)
 
@@ -361,6 +362,7 @@ class SettingsViewModel(
     fun updateCrossfadeEnabled(enabled: Boolean) = launchSave { settingsPreferences.saveCrossfadeEnabled(enabled) }
 
     fun updateCrossfadeDurationMs(durationMs: Int) = launchSave { settingsPreferences.saveCrossfadeDurationMs(durationMs) }
+    fun updateCrossfadeTrimSilence(enabled: Boolean) = launchSave { settingsPreferences.saveCrossfadeTrimSilence(enabled) }
 
     fun updateWifiOnlyPlay(enabled: Boolean) = launchSave { settingsPreferences.saveWifiOnlyPlay(enabled) }
 

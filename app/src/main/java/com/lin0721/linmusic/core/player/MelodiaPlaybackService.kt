@@ -47,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -178,11 +179,11 @@ class MelodiaPlaybackService : MediaSessionService() {
             primary = ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setHandleAudioBecomingNoisy(true)
-                .build().apply { setPreloadConfiguration(ExoPlayer.PreloadConfiguration(5_000_000L)) },
+                .build().apply { setPreloadConfiguration(ExoPlayer.PreloadConfiguration(10_000_000L)) },
             secondary = ExoPlayer.Builder(this)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setHandleAudioBecomingNoisy(true)
-                .build().apply { setPreloadConfiguration(ExoPlayer.PreloadConfiguration(5_000_000L)) },
+                .build().apply { setPreloadConfiguration(ExoPlayer.PreloadConfiguration(10_000_000L)) },
             audioAttributes = audioAttributes
         )
         sessionPlayer.setMetadataTransformer { base ->
@@ -232,7 +233,10 @@ class MelodiaPlaybackService : MediaSessionService() {
             .build()
         serviceScope.launch {
             // Remove old command grants when strict mode changes; the request callback also checks live settings.
-            sourcePreferences.strictFallbackEnabled.collect { updateMediaSessionButtons() }
+            sourcePreferences.strictFallbackEnabled.distinctUntilChanged().collect {
+                crossfadePlayer?.cancelVerifiedTransition()
+                updateMediaSessionButtons()
+            }
         }
 
         externalLyricCoordinator.onMetadataChanged = {
@@ -369,6 +373,8 @@ class MelodiaPlaybackService : MediaSessionService() {
             .add(SessionCommand("ACTION_TOGGLE_LIKE", Bundle()))
             .add(SessionCommand("ACTION_TOGGLE_PLAY_MODE", Bundle()))
             .add(SessionCommand("ACTION_SET_PREFERRED_AUDIO_DEVICE", Bundle()))
+            .add(SessionCommand(TransitionCommands.STAGE, Bundle()))
+            .add(SessionCommand(TransitionCommands.CANCEL, Bundle()))
             .build()
     }
 
@@ -478,6 +484,26 @@ class MelodiaPlaybackService : MediaSessionService() {
             args: Bundle
         ): com.google.common.util.concurrent.ListenableFuture<SessionResult> {
             when (customCommand.customAction) {
+                TransitionCommands.CANCEL, TransitionCommands.STAGE -> {
+                    // URI-bearing preparation is private to Manager, with the same trust boundary
+                    // as its setMediaItems calls. Never let a notification or another app stage URLs.
+                    if (controller.packageName != packageName || session.isMediaNotificationController(controller)) {
+                        return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
+                    }
+                    if (customCommand.customAction == TransitionCommands.CANCEL) {
+                        crossfadePlayer?.cancelVerifiedTransition()
+                    } else {
+                        val strict = runBlocking { sourcePreferences.strictFallbackEnabled.first() }
+                        val item = args.getBundle(TransitionCommands.ITEM)?.let(androidx.media3.common.MediaItem::fromBundle)
+                        val accepted = item != null && strict == args.getBoolean(TransitionCommands.STRICT) &&
+                            crossfadePlayer?.stageVerifiedTransition(args.getString(TransitionCommands.EXPECTED_ID).orEmpty(),
+                                args.getLong(TransitionCommands.GENERATION), item,
+                                args.getLong(TransitionCommands.TRIGGER_MS), args.getLong(TransitionCommands.FADE_MS),
+                                args.getLong(TransitionCommands.START_MS)) == true
+                        if (!accepted) return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_INVALID_STATE))
+                    }
+                    return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
                 "ACTION_TOGGLE_LIKE" -> {
                     val songId = player?.currentMediaItem?.mediaId?.toLongOrNull() ?: -1L
                     if (songId != -1L) {
