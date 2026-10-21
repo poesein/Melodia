@@ -37,6 +37,8 @@ import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.core.ui.theme.ScreenSlideDurationMs
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogViewModel
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogUiState
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistAlbumCorrectionsState
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistAlbumCorrectionsViewModel
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -44,6 +46,7 @@ fun ArtistScreen(
     artistId: Long,
     viewModel: ArtistViewModel = koinViewModel(),
     catalogViewModel: ArtistCatalogViewModel = koinViewModel(),
+    correctionsViewModel: ArtistAlbumCorrectionsViewModel = koinViewModel(),
     onBack: () -> Unit,
     onArtistClick: (Long) -> Unit,
     onPlaylistClick: (Long) -> Unit,
@@ -63,6 +66,8 @@ fun ArtistScreen(
     val albumDefaultMinTracks by viewModel.albumDefaultMinTracks.collectAsStateWithLifecycle()
     val albumMinTracksOverride by viewModel.albumMinTracksOverride.collectAsStateWithLifecycle()
     val catalogState by catalogViewModel.state.collectAsStateWithLifecycle()
+    val correctionsState by correctionsViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(artistId) { correctionsViewModel.selectArtist(artistId) }
 
     val artistState = uiState as? ArtistUiState.Success
     LaunchedEffect(artistState?.artist, artistState?.albums) {
@@ -124,6 +129,12 @@ fun ArtistScreen(
                     onAlbumMinTracksChanged = viewModel::updateAlbumMinTracks,
                     onResetAlbumMinTracks = viewModel::resetAlbumMinTracks,
                     catalogState = activeCatalogState,
+                    correctionsState = correctionsState.takeIf { it.artistId == state.artist.id }
+                        ?: ArtistAlbumCorrectionsState(artistId = state.artist.id),
+                    onCorrectionsEnabled = correctionsViewModel::setEnabled,
+                    onAlbumCorrection = correctionsViewModel::setDecision,
+                    onCorrectionActive = correctionsViewModel::setEntryActive,
+                    onRetryCorrections = correctionsViewModel::retry,
                     onCatalogEnabledChanged = catalogViewModel::setEnabled,
                     onCatalogFollowDefault = catalogViewModel::followDefault,
                     onCatalogQueryChanged = catalogViewModel::updateQuery,

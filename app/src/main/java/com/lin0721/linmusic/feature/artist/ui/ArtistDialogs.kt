@@ -72,6 +72,7 @@ fun ArtistMoreMenuSheet(
     catalogEnabled: Boolean,
     catalogUsesDefault: Boolean = true,
     onCatalogSettings: () -> Unit,
+    onManualCorrections: () -> Unit,
     onBlockClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -96,6 +97,10 @@ fun ArtistMoreMenuSheet(
                 fontWeight = FontWeight.ExtraBold,
                 modifier = Modifier.padding(bottom = MelodiaSpacing.md)
             )
+
+            TextButton(onClick = { onDismiss(); onManualCorrections() }, modifier = Modifier.fillMaxWidth()) {
+                Text("手动修正专辑（添加 / 隐藏）")
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth().clickable {

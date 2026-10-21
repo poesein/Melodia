@@ -27,6 +27,9 @@ fun LazyListScope.artistAlbumTab(
     catalogSelection: ArtistCatalogSelection?,
     onCatalogSettings: () -> Unit,
     onCatalogRetry: () -> Unit,
+    onManualCorrections: () -> Unit,
+    correctionCount: Int,
+    correctionsApplied: Boolean,
     onRestoreAll: () -> Unit,
     hasMore: Boolean,
     loadingMore: Boolean,
@@ -49,9 +52,12 @@ fun LazyListScope.artistAlbumTab(
             )
             Row {
                 TextButton(onClick = onCatalogSettings) { Text("资料库设置") }
+                TextButton(onClick = onManualCorrections) { Text("手动修正") }
                 if (catalogState.error != null) TextButton(onClick = onCatalogRetry, enabled = !catalogState.loading) { Text("重试") }
                 TextButton(onClick = onRestoreAll, enabled = !catalogState.saving) { Text("恢复全部") }
             }
+            if (correctionCount > 0) Text("已保存 $correctionCount 项手动修正 · ${if (correctionsApplied) "正在应用" else "暂未应用"}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
     if (minTracks > 0) {

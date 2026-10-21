@@ -24,6 +24,7 @@ import com.lin0721.linmusic.feature.podcast.data.PodcastProgressPreferences
 import com.lin0721.linmusic.feature.podcast.data.PodcastSeenPreferences
 import com.lin0721.linmusic.feature.search.data.SearchHistoryPreferences
 import com.lin0721.linmusic.feature.artist.data.catalog.ArtistCatalogRepository
+import com.lin0721.linmusic.feature.artist.data.catalog.ArtistAlbumCorrectionsRepository
 import kotlinx.coroutines.flow.first
 import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
@@ -45,6 +46,7 @@ val localModule = module {
     single<LibraryPreferences> { AndroidLibraryPreferences(androidContext()) }
     single { SearchHistoryPreferences(PreferencesStores.get(androidContext(), PreferencesStores.SEARCH_HISTORY)) }
     single { ArtistCatalogRepository(androidContext()) }
+    single { ArtistAlbumCorrectionsRepository(androidContext()) }
     single { PodcastProgressPreferences(PreferencesStores.get(androidContext(), PreferencesStores.PODCAST)) }
     single { PodcastSeenPreferences(PreferencesStores.get(androidContext(), PreferencesStores.PODCAST)) }
     single<XeapiKeyStore> { XeapiKeyStoreImpl(PreferencesStores.get(androidContext(), PreferencesStores.XEAPI_KEY)) }

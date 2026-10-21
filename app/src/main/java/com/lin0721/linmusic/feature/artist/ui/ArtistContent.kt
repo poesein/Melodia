@@ -34,6 +34,8 @@ import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogArtist
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogMatcher
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogUiState
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogSheet
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistAlbumCorrectionsSheet
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistAlbumCorrectionsState
 import com.lin0721.linmusic.core.ui.components.SelectionAction
 import com.lin0721.linmusic.core.ui.components.TrackSelectionOverlay
 import com.lin0721.linmusic.core.ui.components.rememberSelectionBottomPadding
@@ -70,6 +72,11 @@ fun ArtistContent(
     onAlbumMinTracksChanged: (Int) -> Unit,
     onResetAlbumMinTracks: () -> Unit,
     catalogState: ArtistCatalogUiState,
+    correctionsState: ArtistAlbumCorrectionsState,
+    onCorrectionsEnabled: (Boolean) -> Unit,
+    onAlbumCorrection: (ArtistAlbum, Boolean) -> Unit,
+    onCorrectionActive: (Long, Boolean) -> Unit,
+    onRetryCorrections: () -> Unit,
     onCatalogEnabledChanged: (Boolean) -> Unit,
     onCatalogFollowDefault: () -> Unit,
     onCatalogQueryChanged: (String) -> Unit,
@@ -117,13 +124,21 @@ fun ArtistContent(
     var showMoreMenuSheet by remember { mutableStateOf(false) }
     var showAlbumMinimumDialog by remember { mutableStateOf(false) }
     var showCatalogSheet by remember { mutableStateOf(false) }
+    var showCorrectionsSheet by remember(artist.id) { mutableStateOf(false) }
     val catalogSelection = remember(albums, catalogState.enabled, catalogState.groups, catalogState.artistMbid, albumMinTracks) {
         catalogState.groups?.takeIf { catalogState.enabled }?.let {
             ArtistCatalogMatcher.select(albums, it, boundArtistMbid = catalogState.artistMbid, minTracks = albumMinTracks)
         }
     }
-    val visibleAlbums = remember(albums, catalogSelection, albumMinTracks) {
+    val automaticAlbums = remember(albums, catalogSelection, albumMinTracks) {
         ArtistAlbumSelection.visibleAlbums(catalogSelection?.albums ?: albums, albumMinTracks)
+    }
+    val visibleAlbums = remember(automaticAlbums, albums, correctionsState.value, catalogState.enabled) {
+        correctionsState.value.apply(automaticAlbums, albums, catalogState.enabled)
+    }
+    // The editor needs excluded editions too, including when opened from another artist tab.
+    LaunchedEffect(showCorrectionsSheet, albums.size, albumsHasMore, albumsLoadingMore, albumsLoadError) {
+        if (showCorrectionsSheet && albumsHasMore && !albumsLoadingMore && albumsLoadError == null) onLoadMoreAlbums()
     }
 
     var dominantColor by remember { mutableStateOf(CoverPlaceholderDark) }
@@ -291,6 +306,9 @@ fun ArtistContent(
                         catalogSelection = catalogSelection,
                         onCatalogSettings = { showCatalogSheet = true },
                         onCatalogRetry = onCatalogRetry,
+                        onManualCorrections = { showCorrectionsSheet = true },
+                        correctionCount = correctionsState.value.entries.size,
+                        correctionsApplied = correctionsState.value.enabled,
                         onRestoreAll = { onCatalogEnabledChanged(false); onAlbumMinTracksChanged(0) },
                         hasMore = albumsHasMore,
                         loadingMore = albumsLoadingMore,
@@ -393,6 +411,7 @@ fun ArtistContent(
                 catalogEnabled = catalogState.enabled,
                 catalogUsesDefault = catalogState.enabledOverride == null,
                 onCatalogSettings = { showCatalogSheet = true },
+                onManualCorrections = { showCorrectionsSheet = true },
                 onBlockClick = onBlockClick,
                 onDismiss = { showMoreMenuSheet = false }
             )
@@ -421,6 +440,16 @@ fun ArtistContent(
                 onRetry = onCatalogRetry,
                 onRestoreAll = { onCatalogEnabledChanged(false); onAlbumMinTracksChanged(0) },
                 onDismiss = { showCatalogSheet = false }
+            )
+        }
+        if (showCorrectionsSheet) {
+            ArtistAlbumCorrectionsSheet(
+                artistName = artist.name, sourceAlbums = albums, automaticAlbums = automaticAlbums,
+                state = correctionsState, catalogEnabled = catalogState.enabled,
+                hasMore = albumsHasMore, loadingMore = albumsLoadingMore, loadError = albumsLoadError,
+                onRetryAlbums = onRetryAlbums, onRetryRecords = onRetryCorrections,
+                onEnabledChanged = onCorrectionsEnabled, onDecision = onAlbumCorrection,
+                onEntryActive = onCorrectionActive, onDismiss = { showCorrectionsSheet = false }
             )
         }
     }

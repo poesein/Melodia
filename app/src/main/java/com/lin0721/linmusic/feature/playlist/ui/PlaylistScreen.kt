@@ -75,6 +75,8 @@ import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.core.model.Album
 import com.lin0721.linmusic.feature.localmusic.ui.LocalAlbumAssociationViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.LocalAlbumAssociationHost
+import com.lin0721.linmusic.feature.artist.ui.catalog.AlbumArtistCorrectionHost
+import com.lin0721.linmusic.core.model.PlaylistDetail
 import com.lin0721.linmusic.core.model.isLikedSongsPlaylist
 import com.lin0721.linmusic.core.ui.components.DraggableSongRow
 import com.lin0721.linmusic.core.ui.components.SelectionAction
@@ -178,6 +180,7 @@ fun PlaylistScreen(
     val composerState by viewModel.composerState.collectAsStateWithLifecycle()
     val floorState by viewModel.floorState.collectAsStateWithLifecycle()
     var showMoreMenuSheet by remember { mutableStateOf(false) }
+    var albumArtistCorrection by remember(playlistId, isAlbum) { mutableStateOf<PlaylistDetail?>(null) }
     var artistPickerEntries by remember { mutableStateOf<List<ArtistPickerEntry>>(emptyList()) }
     var showImportTargetSheet by remember { mutableStateOf(false) }
     var showEditInfoDialog by remember { mutableStateOf(false) }
@@ -869,6 +872,9 @@ fun PlaylistScreen(
             )
         }
 
+        albumArtistCorrection?.let { album ->
+            AlbumArtistCorrectionHost(album, onDismiss = { albumArtistCorrection = null })
+        }
         if (showMoreMenuSheet && successState != null) {
             val playlist = successState.playlist
             val moreMenuSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -955,6 +961,13 @@ fun PlaylistScreen(
                         playlist.id != userProfile?.uid
 
                     val menuItems = buildList {
+                        if (isAlbum) add(PlaylistMenuItem(
+                            icon = Icons.Default.LibraryAdd,
+                            title = "显示在歌手专辑页"
+                        ) {
+                            showMoreMenuSheet = false
+                            albumArtistCorrection = playlist
+                        })
                         if (isAlbum) add(PlaylistMenuItem(
                             icon = Icons.Default.Link,
                             title = "关联本地专辑（专辑内匹配）"

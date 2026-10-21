@@ -31,6 +31,7 @@ import com.lin0721.linmusic.feature.cloud.ui.CloudViewModel
 import com.lin0721.linmusic.feature.downloads.ui.DownloadsViewModel
 import com.lin0721.linmusic.feature.artist.ui.ArtistViewModel
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogViewModel
+import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistAlbumCorrectionsViewModel
 import com.lin0721.linmusic.core.source.AudioSourceProvider
 import com.lin0721.linmusic.core.source.PlatformSearchProvider
 import com.lin0721.linmusic.feature.search.ui.SearchViewModel
@@ -57,6 +58,7 @@ val viewModelModule = module {
     viewModelOf(::PlaylistViewModel)
     viewModelOf(::ArtistViewModel)
     viewModelOf(::ArtistCatalogViewModel)
+    viewModelOf(::ArtistAlbumCorrectionsViewModel)
     viewModel {
         SearchViewModel(
             repository = get(),
