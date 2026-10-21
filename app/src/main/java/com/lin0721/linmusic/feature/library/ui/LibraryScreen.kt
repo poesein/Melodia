@@ -76,6 +76,7 @@ import com.lin0721.linmusic.core.ui.components.ProfileSidebar
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import com.lin0721.linmusic.core.auth.UserProfile
+import com.lin0721.linmusic.feature.library.textimport.PlaylistTextImportSheet
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -113,6 +114,8 @@ fun LibraryScreen(
     }
 
     var showCreateDialog by remember { mutableStateOf(false) }
+    var showAddMenu by remember { mutableStateOf(false) }
+    var showTextImport by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
 
@@ -293,15 +296,28 @@ fun LibraryScreen(
                             Icon(Icons.Default.Search, contentDescription = "搜索", tint = MaterialTheme.colorScheme.onSurface)
                         }
 
-                        MelodiaIconButton(onClick = {
-                            if (userProfile != null) {
-                                showCreateDialog = true
-                            } else {
-                                com.lin0721.linmusic.core.ui.components.ToastManager.showToast("请先登录以创建歌单！")
-                                showLoginSheet = true
+                        Box {
+                            MelodiaIconButton(onClick = { showAddMenu = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "新建或导入歌单", tint = MaterialTheme.colorScheme.onSurface)
                             }
-                        }) {
-                            Icon(Icons.Default.Add, contentDescription = "创建歌单", tint = MaterialTheme.colorScheme.onSurface)
+                            DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
+                                DropdownMenuItem(text = { Text("新建歌单") }, onClick = {
+                                    showAddMenu = false
+                                    if (userProfile != null) showCreateDialog = true
+                                    else {
+                                        com.lin0721.linmusic.core.ui.components.ToastManager.showToast("请先登录以创建歌单！")
+                                        showLoginSheet = true
+                                    }
+                                })
+                                DropdownMenuItem(text = { Text("导入歌单（TXT）") }, onClick = {
+                                    showAddMenu = false
+                                    if (userProfile != null) showTextImport = true
+                                    else {
+                                        com.lin0721.linmusic.core.ui.components.ToastManager.showToast("请先登录以导入歌单")
+                                        showLoginSheet = true
+                                    }
+                                })
+                            }
                         }
                     }
                 }
@@ -490,6 +506,14 @@ fun LibraryScreen(
                     showCreateDialog = false
                 }
             )
+        }
+
+        if (showTextImport) {
+            PlaylistTextImportSheet(onDismiss = { showTextImport = false }, onImported = { id ->
+                showTextImport = false
+                viewModel.loadLibraryData()
+                onPlaylistClick(id)
+            })
         }
 
         // 登录管理底部面板与 WebView

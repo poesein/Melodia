@@ -12,6 +12,7 @@ import com.lin0721.linmusic.feature.podcast.ui.PodcastSubscribedViewModel
 import com.lin0721.linmusic.feature.podcast.ui.PodcastToplistViewModel
 import com.lin0721.linmusic.feature.podcast.ui.RadioDetailViewModel
 import com.lin0721.linmusic.feature.library.ui.LibraryViewModel
+import com.lin0721.linmusic.feature.library.textimport.PlaylistTextImportViewModel
 import com.lin0721.linmusic.feature.listendata.ui.ListenDataViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.OnlineLocalAudioPickerViewModel
@@ -75,6 +76,7 @@ val viewModelModule = module {
     }
     viewModelOf(::PlaylistCategoryViewModel)
     viewModelOf(::LibraryViewModel)
+    viewModelOf(::PlaylistTextImportViewModel)
     viewModelOf(::RecentPlayViewModel)
     viewModelOf(::CloudViewModel)
     viewModelOf(::DownloadsViewModel)

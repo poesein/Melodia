@@ -32,6 +32,7 @@ fun MusicScreen(
     onPlaylistClick: (Long, Boolean) -> Unit,
     onStyleClick: (Long, String) -> Unit,
     onSearchClick: () -> Unit,
+    onOpenRecognition: () -> Unit,
     musicViewModel: MusicViewModel = koinViewModel(),
     newWorksViewModel: NewWorksViewModel = koinViewModel()
 ) {
@@ -85,7 +86,8 @@ fun MusicScreen(
                     uiState = musicUiState,
                     onStyleClick = onStyleClick,
                     onRetry = musicViewModel::loadStyles,
-                    onSearchClick = onSearchClick
+                    onSearchClick = onSearchClick,
+                    onRecognitionClick = onOpenRecognition
                 )
             }
         }

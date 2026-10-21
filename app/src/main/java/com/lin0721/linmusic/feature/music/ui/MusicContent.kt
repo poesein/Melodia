@@ -56,13 +56,14 @@ private val TileGap = 10.dp
 // 偏好与全部曲风共用同一比例，随列宽等比缩放
 private const val TileAspectRatio = 1.7f
 
-// 主页保留官方布局；独立音乐页可额外提供偏好标题同行的搜索入口。
+// 主页保留官方布局；独立音乐页可额外提供偏好标题同行的搜索和听歌识曲入口。
 @Composable
 fun MusicContent(
     uiState: MusicUiState,
     onStyleClick: (id: Long, name: String) -> Unit,
     onRetry: () -> Unit,
-    onSearchClick: (() -> Unit)? = null
+    onSearchClick: (() -> Unit)? = null,
+    onRecognitionClick: (() -> Unit)? = null
 ) {
     val columns = rememberMelodiaGridColumns(compact = 2, expandedPortrait = 4, expandedLandscape = 5)
 
@@ -73,7 +74,7 @@ fun MusicContent(
     ) {
         if (onSearchClick != null) {
             item(key = "preference_title") {
-                MusicSectionTitle("你的偏好", onSearchClick = onSearchClick)
+                MusicSectionTitle("你的偏好", onSearchClick = onSearchClick, onRecognitionClick = onRecognitionClick)
             }
         }
         when (uiState) {

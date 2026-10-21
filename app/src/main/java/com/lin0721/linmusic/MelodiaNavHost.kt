@@ -150,7 +150,8 @@ fun MelodiaNavHost(
                     onShowNewWorksFeedChanged = onShowMusicNewWorksChanged,
                     onPlaylistClick = onNavigateToPlaylist,
                     onStyleClick = { id, name -> onNavigateToScreen(Screen.Style(id, name)) },
-                    onSearchClick = onNavigateToSearch
+                    onSearchClick = onNavigateToSearch,
+                    onOpenRecognition = onOpenRecognition
                 )
                 is Screen.Playlist -> {
                     com.lin0721.linmusic.feature.playlist.ui.PlaylistScreen(

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +47,7 @@ import java.time.ZoneId
 
 // 曲风页各段共用的标题
 @Composable
-fun MusicSectionTitle(title: String, trailing: String? = null, onSearchClick: (() -> Unit)? = null) {
+fun MusicSectionTitle(title: String, trailing: String? = null, onSearchClick: (() -> Unit)? = null, onRecognitionClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -61,7 +62,7 @@ fun MusicSectionTitle(title: String, trailing: String? = null, onSearchClick: ((
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false)
+            modifier = Modifier.weight(1f, fill = onSearchClick != null || onRecognitionClick != null)
         )
         trailing?.let {
             Text(text = it, color = TextGray, fontSize = 11.5.sp, modifier = Modifier.padding(start = 8.dp))
@@ -69,6 +70,11 @@ fun MusicSectionTitle(title: String, trailing: String? = null, onSearchClick: ((
         onSearchClick?.let { action ->
             IconButton(onClick = action) {
                 Icon(Icons.Rounded.Search, contentDescription = "搜索音乐", tint = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+        onRecognitionClick?.let { action ->
+            IconButton(onClick = action) {
+                Icon(Icons.Rounded.MusicNote, contentDescription = "听歌识曲", tint = MaterialTheme.colorScheme.onSurface)
             }
         }
     }
