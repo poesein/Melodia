@@ -62,7 +62,8 @@ fun FullPlayerCoverArt(
     isSidebarFullscreen: Boolean = false,
     onPlaylistClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    onCancelSwipe: () -> Boolean = { false }
+    onCancelSwipe: () -> Boolean = { false },
+    onCoverClick: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier
@@ -98,7 +99,9 @@ fun FullPlayerCoverArt(
             shape = RoundedCornerShape(RadiusCompact),
             elevation = 6.dp,
             modifier = Modifier.fillMaxWidth(),
-            onCancelPending = onCancelSwipe
+            onCancelPending = onCancelSwipe,
+            onClick = onCoverClick,
+            onClickLabel = "显示歌词"
         )
     }
 }

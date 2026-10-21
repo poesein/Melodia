@@ -79,7 +79,8 @@ fun LazyListScope.fullPlayerPlaybackSection(
     baseCoverPadding: Dp = MelodiaSpacing.lg,
     itemGap: Dp = 0.dp,
     fillGap: Dp? = null,
-    fillTail: Dp = 0.dp
+    fillTail: Dp = 0.dp,
+    onCoverClick: (() -> Unit)? = null
 ) {
     fun fillGapItem(index: Int) {
         val gapHeight = fillGap ?: (if (itemGap > 0.dp) itemGap else null) ?: return
@@ -108,7 +109,8 @@ fun LazyListScope.fullPlayerPlaybackSection(
                 onToggleSidebarFullscreen = onToggleSidebarFullscreen,
                 isSidebarFullscreen = isSidebarFullscreen,
                 onPlaylistClick = onPlaylistClick,
-                onCancelSwipe = onCancelSwipe
+                onCancelSwipe = onCancelSwipe,
+                onCoverClick = onCoverClick
             )
         }
     }

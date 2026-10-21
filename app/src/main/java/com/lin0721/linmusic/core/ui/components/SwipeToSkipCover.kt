@@ -1,6 +1,7 @@
 package com.lin0721.linmusic.core.ui.components
 
 import androidx.compose.animation.core.animate
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -28,6 +29,9 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.lin0721.linmusic.core.ui.theme.SwipeCoverSpringSpec
@@ -224,7 +228,9 @@ fun SwipeToSkipCover(
     shape: Shape = RectangleShape,
     elevation: Dp = 0.dp,
     // 快速滑回中间时尝试撤销上一次已确认但还没落地的切歌；返回 true 表示撤销成功
-    onCancelPending: () -> Boolean = { false }
+    onCancelPending: () -> Boolean = { false },
+    onClick: (() -> Unit)? = null,
+    onClickLabel: String? = null
 ) {
     val scope = rememberCoroutineScope()
     var offsetX by remember { mutableFloatStateOf(0f) }
@@ -452,7 +458,10 @@ fun SwipeToSkipCover(
                     shape = shape,
                     elevation = elevation,
                     contentPadding = contentPadding,
-                    translationXProvider = layer.translationXProvider
+                    translationXProvider = layer.translationXProvider,
+                    // Only the visible current cover is actionable; padding and swipe previews are not.
+                    onClick = onClick.takeIf { layer.key == currentKeyStr },
+                    onClickLabel = onClickLabel
                 )
             }
         }
@@ -474,7 +483,9 @@ private fun SwipeCoverLayer(
     shape: Shape,
     elevation: Dp,
     contentPadding: Dp,
-    translationXProvider: () -> Float
+    translationXProvider: () -> Float,
+    onClick: (() -> Unit)?,
+    onClickLabel: String?
 ) {
     var isTransparentCover by remember(url) {
         mutableStateOf(CoverContourShadowHelper.isTransparent(url) == true)
@@ -513,6 +524,12 @@ private fun SwipeCoverLayer(
                 } else {
                     Modifier
                 }
+            )
+            .then(
+                if (onClick != null) Modifier
+                    .clickable(onClickLabel = onClickLabel, role = Role.Button, onClick = onClick)
+                    .semantics { if (onClickLabel != null) contentDescription = onClickLabel }
+                else Modifier
             )
     )
 }

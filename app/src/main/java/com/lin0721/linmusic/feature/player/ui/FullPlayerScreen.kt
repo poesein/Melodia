@@ -145,6 +145,7 @@ fun FullPlayerScreen(
     val nextQueueItem by viewModel.playerManager.nextQueueItem.collectAsStateWithLifecycle()
     var showQueueSheet by remember { mutableStateOf(false) }
     var isLyricsFullScreen by remember { mutableStateOf(false) }
+    val openFullScreenLyrics: () -> Unit = { isLyricsFullScreen = true }
 
     LaunchedEffect(isLyricsFullScreen) {
         onLyricsFullScreenChange(isLyricsFullScreen)
@@ -628,7 +629,8 @@ fun FullPlayerScreen(
                         baseCoverPadding = animatedCoverPadding,
                         itemGap = animatedItemGap,
                         fillGap = if (allCardsHidden) fillGap else null,
-                        fillTail = fillTail
+                        fillTail = fillTail,
+                        onCoverClick = if (podcast.isPodcast) null else openFullScreenLyrics
                     )
 
                     fullPlayerInfoSection(
@@ -637,7 +639,7 @@ fun FullPlayerScreen(
                         commentsState = commentsState,
                         currentLyricIndex = currentLyricIndex,
                         cardLayout = cardLayout,
-                        onOpenFullScreenLyrics = { isLyricsFullScreen = true },
+                        onOpenFullScreenLyrics = openFullScreenLyrics,
                         onCommentsClick = { showCommentsSheet = true },
                         onRetryComments = viewModel::retryComments,
                         onFollowArtistClick = { artistId -> viewModel.toggleArtistFollow(artistId) },
@@ -701,7 +703,7 @@ fun FullPlayerScreen(
                         onMoreClick = { showMoreOptionsSheet = true },
                         onToggleSidebarFullscreen = onToggleSidebarFullscreen,
                         isSidebarFullscreen = isSidebarFullscreen,
-                        onFullscreenLyricsClick = { isLyricsFullScreen = true },
+                        onFullscreenLyricsClick = openFullScreenLyrics,
                         onPlaylistClick = openPlaylistSource,
                         modifier = barModifier
                     )
@@ -720,7 +722,9 @@ fun FullPlayerScreen(
                         shape = RoundedCornerShape(RadiusCompact),
                         elevation = 24.dp,
                         modifier = coverModifier,
-                        onCancelPending = viewModel.playerManager::cancelPendingSkip
+                        onCancelPending = viewModel.playerManager::cancelPendingSkip,
+                        onClick = if (podcast.isPodcast) null else openFullScreenLyrics,
+                        onClickLabel = "显示歌词"
                     )
                 },
                 playbackControls = {
