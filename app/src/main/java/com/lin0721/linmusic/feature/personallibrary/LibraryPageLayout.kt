@@ -56,6 +56,11 @@ data class LibraryPageLayout(
         return copy(visiblePlaylistIds = if (show) selected + id else selected - id)
     }
 
+    /** A newly created playlist is visible even when an older selection already exists. */
+    fun withCreatedPlaylistVisible(id: Long): LibraryPageLayout =
+        if (id <= 0 || visiblePlaylistIds == null) this
+        else copy(visiblePlaylistIds = visiblePlaylistIds + id.toString())
+
     fun itemLimit(key: String): Int = itemLimits[key]?.coerceIn(0, 5000) ?: 10
 
     /** Stable identities are display-only; missing records stay in the saved order for later scans. */

@@ -63,4 +63,24 @@ class PersonalPlaylistSelectionUiTest {
         compose.runOnIdle { mode = "covers" }
         compose.onNodeWithContentDescription("听歌排行歌单封面").assertIsDisplayed()
     }
+
+    @Test fun newlyCreatedPlaylistAppearsInPreviewAndAllWithoutRevealingHiddenPlaylists() {
+        var items by mutableStateOf(playlists)
+        var layout by mutableStateOf(LibraryPageLayout(visiblePlaylistIds = setOf("1")))
+        var all by mutableStateOf(false)
+        compose.setContent { Theme {
+            if (all) PersonalLibraryCollectionSheet(LibraryItemType.PLAYLIST, items, layout, {}, {})
+            else PersonalLibraryContent(items, layout, {}, { all = true })
+        } }
+        compose.runOnIdle {
+            layout = layout.withCreatedPlaylistVisible(3)
+            items = items + LibraryItem("3", "Newly Created", "", "", LibraryItemType.PLAYLIST)
+        }
+        compose.onNodeWithText("Newly Created").assertIsDisplayed()
+        compose.onNodeWithText("Playlist Two").assertDoesNotExist()
+        compose.runOnIdle { all = true }
+        compose.onNodeWithText("Newly Created").assertIsDisplayed()
+        compose.onNodeWithText("Playlist Two").assertDoesNotExist()
+        compose.onNodeWithText("歌单 · 2").assertExists()
+    }
 }

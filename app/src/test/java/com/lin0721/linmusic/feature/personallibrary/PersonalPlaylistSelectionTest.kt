@@ -32,4 +32,11 @@ class PersonalPlaylistSelectionTest {
         assertEquals(selected.visiblePlaylistIds, selected.moved(LibraryPage.PERSONAL, "artists", -1).visiblePlaylistIds)
         assertEquals(selected.visiblePlaylistIds, selected.withLocalShelfSettings(LibraryPageLayout()).visiblePlaylistIds)
     }
+    @Test fun newCreationIsVisibleWhilePreviouslyHiddenPlaylistsRemainHidden() {
+        val selected = LibraryPageLayout().setPlaylistVisible("20", false, setOf("10", "20"))
+        val created = selected.withCreatedPlaylistVisible(30)
+        assertTrue(created.playlistIsVisible("30"))
+        assertTrue(created.playlistIsVisible("10")); assertFalse(created.playlistIsVisible("20"))
+        assertFalse(created.setPlaylistVisible("30", false, setOf("10", "20", "30")).playlistIsVisible("30"))
+    }
 }

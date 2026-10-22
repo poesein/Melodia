@@ -47,7 +47,7 @@ internal fun PersonalPlaylistSelectionContent(items: List<LibraryItem>, state: L
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("选择显示的歌单", style = MaterialTheme.typography.titleLarge)
         Text("已选 ${playlists.count { state.layout.playlistIsVisible(it.id) }} / ${playlists.size} · 点击直接保存", style = MaterialTheme.typography.bodyMedium)
-        Text("仅调整个人音乐库的显示；设置选择后，新增歌单也可在此勾选。", style = MaterialTheme.typography.bodySmall)
+        Text("仅调整个人音乐库的显示；新建歌单（含文本导入新建）默认显示。", style = MaterialTheme.typography.bodySmall)
         Row {
             TextButton(enabled = enabled && ids.isNotEmpty(), onClick = { onSave { it.copy(visiblePlaylistIds = it.visiblePlaylistIds.orEmpty() + ids) } }) { Text("全选") }
             TextButton(enabled = enabled && ids.isNotEmpty(), onClick = { onSave { it.copy(visiblePlaylistIds = (it.visiblePlaylistIds ?: ids) - ids) } }) { Text("清除选择") }

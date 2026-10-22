@@ -41,6 +41,12 @@ import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 import org.koin.android.ext.koin.androidContext
 import com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutViewModel
+import com.lin0721.linmusic.feature.personallibrary.CreatedPlaylistVisibility
+import com.lin0721.linmusic.core.log.AppLogger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import org.koin.dsl.onClose
 
 /**
  * Koin ViewModel 层依赖注入模块
@@ -80,6 +86,11 @@ val viewModelModule = module {
     }
     viewModelOf(::PlaylistCategoryViewModel)
     single { com.lin0721.linmusic.feature.personallibrary.LibraryPageLayoutRepository(androidContext()) }
+    single(createdAtStart = true) {
+        CreatedPlaylistVisibility(get(), get(), CoroutineScope(SupervisorJob() + Dispatchers.IO)) {
+            error -> AppLogger.e("PersonalLibrary", "新歌单显示设置保存失败", error)
+        }
+    } onClose { it?.close() }
     viewModelOf(::LibraryPageLayoutViewModel)
     viewModelOf(::LibraryViewModel)
     viewModelOf(::PlaylistTextImportViewModel)

@@ -138,7 +138,7 @@ object ArtistCatalogMatcher {
     private fun catalogPrimaryType(group: ArtistCatalogReleaseGroup): String? =
         group.primaryType?.trim()?.lowercase(Locale.ROOT)
 
-    private fun releaseDate(value: String?): LocalDate? = value?.takeIf(String::isNotBlank)?.let {
+    internal fun releaseDate(value: String?): LocalDate? = value?.takeIf(String::isNotBlank)?.let {
         runCatching {
             val parts = it.split('-')
             LocalDate.of(parts[0].toInt(), parts.getOrNull(1)?.toInt() ?: 1, parts.getOrNull(2)?.toInt() ?: 1)

@@ -133,8 +133,8 @@ fun ArtistContent(
     val automaticAlbums = remember(albums, catalogSelection, albumMinTracks) {
         ArtistAlbumSelection.visibleAlbums(catalogSelection?.albums ?: albums, albumMinTracks)
     }
-    val visibleAlbums = remember(automaticAlbums, albums, correctionsState.value, catalogState.enabled) {
-        correctionsState.value.apply(automaticAlbums, albums, catalogState.enabled)
+    val visibleAlbums = remember(automaticAlbums, albums, correctionsState.value, catalogState.enabled, catalogSelection) {
+        correctionsState.value.apply(automaticAlbums, albums, catalogState.enabled, catalogSelection?.matches.orEmpty())
     }
     // The editor needs excluded editions too, including when opened from another artist tab.
     LaunchedEffect(showCorrectionsSheet, albums.size, albumsHasMore, albumsLoadingMore, albumsLoadError) {
