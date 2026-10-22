@@ -18,8 +18,13 @@ fun pendingTrackIds(detail: PlaylistDetail): List<Long> {
 fun PlaylistDetail.withLoadedTracks(requestedIds: List<Long>, loaded: List<Track>): PlaylistDetail {
     val returned = loaded.mapTo(HashSet()) { it.id }
     val dropped = requestedIds.filterTo(HashSet()) { it !in returned }
+    // A response can arrive after a song was removed or added by another in-flight action.
+    val allowed = trackIds.mapTo(HashSet()) { it.id }
+    val requested = requestedIds.toHashSet()
+    val existing = tracks.mapTo(HashSet()) { it.id }
+    val added = loaded.filter { it.id in allowed && it.id in requested && existing.add(it.id) }
     return copy(
-        tracks = tracks + loaded,
+        tracks = tracks + added,
         trackIds = if (dropped.isEmpty()) trackIds else trackIds.filter { it.id !in dropped }
     )
 }

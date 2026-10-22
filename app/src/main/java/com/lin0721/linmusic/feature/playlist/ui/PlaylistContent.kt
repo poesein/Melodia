@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.lin0721.linmusic.LocalBottomOverlayInset
@@ -109,7 +110,10 @@ fun PlaylistContent(
     selectionUi: TrackSelectionUi = TrackSelectionUi(),
     selectionActions: List<SelectionAction> = emptyList(),
     onToggleSelectAll: (List<Long>) -> Unit = {},
-    onExitSelection: () -> Unit = {}
+    onExitSelection: () -> Unit = {},
+    sortOrder: PlaylistTrackSort = PlaylistTrackSort(),
+    onSortOrderChange: (PlaylistTrackSort) -> Unit = {},
+    onCompleteTrackOrder: () -> Unit = {}
 ) {
     val density = LocalDensity.current
 
@@ -131,9 +135,9 @@ fun PlaylistContent(
     }
 
     var searchQuery by remember { mutableStateOf("") }
-    var sortOption by remember { mutableStateOf(PlaylistSortOption.DEFAULT) }
     var showSortSheet by remember { mutableStateOf(false) }
-    val sortedTracks = remember(playlist.tracks, sortOption) { sortOption.sort(playlist.tracks) }
+    val waitingForOrder = sortOrder.reversed && hasMoreTracks
+    val sortedTracks = remember(playlist.tracks, sortOrder) { sortOrder.sort(playlist.tracks) }
     val filteredTracks = remember(sortedTracks, searchQuery) {
         if (searchQuery.isBlank()) sortedTracks
         else sortedTracks.filter {
@@ -162,7 +166,7 @@ fun PlaylistContent(
             listState.layoutInfo.visibleItemsInfo.any { it.index == itemIndex }
         }
     }
-    val showLocateButton = belongsToPlaylist && !historySongsLoading && !isTargetVisibleOnScreen
+    val showLocateButton = belongsToPlaylist && !historySongsLoading && !waitingForOrder && !isTargetVisibleOnScreen
 
     // 从封面提取的主色调，默认为深灰色
     var dominantColor by remember { mutableStateOf(FallbackBase) }
@@ -242,6 +246,7 @@ fun PlaylistContent(
             state          = listState,
             contentPadding = PaddingValues(bottom = LocalBottomOverlayInset.current + 16.dp + rememberSelectionBottomPadding(selectionUi.active)),
             modifier       = Modifier
+                .testTag("playlist_track_list")
                 .graphicsLayer { translationY = searchBarRevealState.revealPx }
                 .nestedScroll(searchBarRevealState.connection)
         ) {
@@ -299,12 +304,12 @@ fun PlaylistContent(
                         PlaylistActionPillsRow(
                             isOwnedPlaylist = canRemoveFromPlaylist,
                             isTracksEmpty = playlist.tracks.isEmpty(),
-                            currentSortOption = sortOption,
+                            currentSortOrder = sortOrder,
                             onAddMusicClick = onAddMusicClick,
                             onEditOrderClick = {
                                 // 拖拽排的是歌单真实顺序。停留在本地排序视图时进入重排，列表会突然跳回默认序，
                                 // 保存后回来又被排序规则盖住看不到结果，因此进入前先把视图切回默认
-                                sortOption = PlaylistSortOption.DEFAULT
+                                onSortOrderChange(PlaylistTrackSort())
                                 onEditOrderClick()
                             },
                             onSortClick = { showSortSheet = true },
@@ -336,15 +341,20 @@ fun PlaylistContent(
                 }
             }
 
-            if (historySongsLoading) {
+            if (historySongsLoading || waitingForOrder) {
                 item(key = "history_songs_loading") {
-                    Box(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(200.dp),
-                        contentAlignment = Alignment.Center
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        if (historySongsLoading || isLoadingMoreTracks) CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        if (waitingForOrder) {
+                            Text("倒序需要完整歌单", Modifier.padding(top = 12.dp))
+                            if (!isLoadingMoreTracks) TextButton(onClick = onCompleteTrackOrder) { Text("加载完整歌单") }
+                        }
                     }
                 }
             } else {
@@ -425,7 +435,7 @@ fun PlaylistContent(
         TrackSelectionOverlay(
             selectionUi = selectionUi,
             actions = selectionActions,
-            visibleIds = filteredTracks.map { it.id },
+            visibleIds = if (waitingForOrder) emptyList() else filteredTracks.map { it.id },
             headerColor = dominantColor.darken(0.35f),
             onToggleSelectAll = onToggleSelectAll,
             onExit = onExitSelection
@@ -516,9 +526,9 @@ fun PlaylistContent(
 
     if (showSortSheet) {
         PlaylistSortSheet(
-            sortOption = sortOption,
-            onSortOptionChange = {
-                sortOption = it
+            sortOrder = sortOrder,
+            onSortOrderChange = {
+                onSortOrderChange(it)
                 showSortSheet = false
             },
             onDismiss = { showSortSheet = false }

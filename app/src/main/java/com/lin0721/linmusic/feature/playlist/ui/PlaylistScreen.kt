@@ -91,6 +91,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.androidx.compose.koinViewModel
+import androidx.compose.runtime.saveable.rememberSaveable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,7 +109,8 @@ fun PlaylistScreen(
     val currentTrack by viewModel.playerManager.nowPlaying.collectAsStateWithLifecycle()
     val isPlaying by viewModel.playerManager.playWhenReady.collectAsStateWithLifecycle()
     val playMode by viewModel.playerManager.playMode.collectAsStateWithLifecycle()
-    val playContext by viewModel.playerManager.playContext.collectAsStateWithLifecycle()
+    val playSource by viewModel.playerManager.playSource.collectAsStateWithLifecycle()
+    val currentQueue by viewModel.playerManager.queue.collectAsStateWithLifecycle()
     val likedSongIds by viewModel.likedSongIds.collectAsStateWithLifecycle()
     val unplayableIds by viewModel.unplayableIds.collectAsStateWithLifecycle()
     val collectState by viewModel.collectState.collectAsStateWithLifecycle()
@@ -192,6 +194,11 @@ fun PlaylistScreen(
     var showBatchDownloadSheet by remember { mutableStateOf(false) }
     var showBatchRemoveConfirm by remember { mutableStateOf(false) }
     var isReorderMode by remember { mutableStateOf(false) }
+    var trackSortOption by rememberSaveable(playlistId, isAlbum) { mutableStateOf(PlaylistSortOption.DEFAULT) }
+    var trackSortReversed by rememberSaveable(playlistId, isAlbum) { mutableStateOf(false) }
+    val trackSort = PlaylistTrackSort(trackSortOption, trackSortReversed)
+    // A full load may finish after the user changes direction; read the latest selection then.
+    val playbackSort by rememberUpdatedState(trackSort)
     var isSavingOrder by remember { mutableStateOf(false) }
     var showDiscardConfirmDialog by remember { mutableStateOf(false) }
     val reorderedTracks = remember { mutableStateListOf<Track>() }
@@ -269,9 +276,19 @@ fun PlaylistScreen(
                     state.playlist.creator?.userId == profile.uid &&
                     !isLikedSongsPlaylistView
                 val isShuffleActive = playMode == PlayMode.SHUFFLE
-                // 当前播放队列的来源是否就是这个歌单（playContext 存的是歌单名）
-                val isThisPlaylistContext = playContext == state.playlist.name
-                val isCurrentlyPlayingThis = isThisPlaylistContext && isPlaying
+                val expectedKind = if (isAlbum) com.lin0721.linmusic.core.player.PlaySource.Kind.ALBUM else com.lin0721.linmusic.core.player.PlaySource.Kind.PLAYLIST
+                val isThisPlaylistContext = playSource?.kind == expectedKind && playSource?.id == state.playlist.id
+                val orderedIds = remember(state.playlist.tracks, trackSort) { trackSort.sort(state.playlist.tracks).map { it.id } }
+                val queueIds = remember(currentQueue) { currentQueue.map { it.songId } }
+                val isThisOrderedQueue = isThisPlaylistContext && com.lin0721.linmusic.feature.playlist.presentation.playlistQueueMatches(
+                    queueIds, orderedIds, isShuffleActive,
+                    allowLoadedPrefix = state.hasMoreTracks && trackSort == PlaylistTrackSort())
+                val isCurrentlyPlayingThis = isThisOrderedQueue && isPlaying
+                // A refreshed/reloaded playlist may become paged again while reverse is still on.
+                // Key by server IDs, not each loaded page, to avoid restarting or retrying endlessly.
+                LaunchedEffect(playlistId, isAlbum, trackSort.reversed, state.playlist.trackIds) {
+                    if (trackSort.reversed && state.hasMoreTracks) viewModel.ensureAllTracksLoaded {}
+                }
 
                 // 进入/退出重排模式复用 MelodiaNavHost 的整屏切换动效（滑入+淡入/滑出+淡出），
                 // 不改动内部结构：分支条件从外层 isReorderMode 换成 lambda 参数 reordering，
@@ -550,6 +567,12 @@ fun PlaylistScreen(
                 } else {
                     PlaylistContent(
                         playlist       = state.playlist,
+                        sortOrder = trackSort,
+                        onSortOrderChange = { requested ->
+                            trackSortOption = requested.option
+                            trackSortReversed = requested.reversed
+                        },
+                        onCompleteTrackOrder = { viewModel.ensureAllTracksLoaded {} },
                         totalDurationMs = totalDurationMs,
                         showPlayCount = !isAlbum,
                         trackPlayCounts = state.trackPlayCounts,
@@ -584,21 +607,16 @@ fun PlaylistScreen(
                     onToggleLike   = viewModel::toggleLikeSong,
                     onPlaySong     = { track ->
                         // 队列需包含歌单全部曲目，超过1000首时会先补全未加载的部分
-                        viewModel.playTrackInPlaylist(track)
+                        viewModel.playTrackInPlaylist(track, { playbackSort.sort(it) }, requireComplete = { playbackSort.reversed })
                     },
                     onPlayRecommendedSong = viewModel::playRecommendedTrack,
                     onAddToPlayNext = { track ->
                         viewModel.addTrackToPlayNext(track)
                     },
                     onPlayAll = {
-                        if (isThisPlaylistContext) {
-                            // 已经是当前播放队列，播放键只做暂停/继续切换
-                            viewModel.playerManager.togglePlayPause()
-                        } else {
-                            // 随机开关是全局播放模式，起播时按当前开关状态决定顺序播放还是打乱播放；
-                            // 超过1000首的歌单会先补全未加载的曲目再起播
-                            viewModel.playAll(shuffle = isShuffleActive)
-                        }
+                        if (isThisOrderedQueue) viewModel.playerManager.togglePlayPause()
+                        else viewModel.playAll(shuffle = isShuffleActive, orderTracks = { playbackSort.sort(it) },
+                            toggleIfSameQueue = true, requireComplete = { playbackSort.reversed })
                     },
                     isShuffleActive = isShuffleActive,
                     isCurrentlyPlayingThis = isCurrentlyPlayingThis,

@@ -21,3 +21,10 @@ enum class PlaylistSortOption(val label: String) {
         DURATION -> tracks.sortedBy { it.dt }
     }
 }
+
+/** Direction is independent of the selected key, including the original playlist order. */
+data class PlaylistTrackSort(val option: PlaylistSortOption = PlaylistSortOption.DEFAULT, val reversed: Boolean = false) {
+    val label: String get() = if (!reversed) option.label else if (option == PlaylistSortOption.DEFAULT) "倒序" else "${option.label} · 倒序"
+
+    fun sort(tracks: List<Track>): List<Track> = option.sort(tracks).let { if (reversed) it.reversed() else it }
+}

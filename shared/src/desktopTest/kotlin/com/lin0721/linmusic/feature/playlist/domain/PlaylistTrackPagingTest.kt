@@ -47,4 +47,23 @@ class PlaylistTrackPagingTest {
         assertEquals(d.trackIds, merged.trackIds)
         assertEquals(listOf(1L, 2L, 3L), merged.tracks.map { it.id })
     }
+    @Test fun `a late page preserves a newly added song and the latest source order`() {
+        val latest = detail(tracks(4, 1), listOf(4, 1, 2, 3))
+        val merged = latest.withLoadedTracks(listOf(2, 3), tracks(2, 3))
+        assertEquals(listOf(4L, 1L, 2L, 3L), merged.tracks.map { it.id })
+        assertTrue(pendingTrackIds(merged).isEmpty())
+    }
+    @Test fun `a late page does not resurrect a song removed while the request was running`() {
+        val latest = detail(tracks(1), listOf(1, 3))
+        val merged = latest.withLoadedTracks(listOf(2, 3), tracks(2, 3))
+        assertEquals(listOf(1L, 3L), merged.tracks.map { it.id })
+        assertEquals(listOf(1L, 3L), merged.trackIds.map { it.id })
+        assertTrue(pendingTrackIds(merged).isEmpty())
+    }
+    @Test fun `an overlapping add or duplicate response does not duplicate a song`() {
+        val latest = detail(tracks(1, 2), listOf(1, 2, 3, 4))
+        val merged = latest.withLoadedTracks(listOf(2, 3), tracks(2, 3, 3, 4))
+        assertEquals(listOf(1L, 2L, 3L), merged.tracks.map { it.id })
+        assertEquals(listOf(4L), pendingTrackIds(merged))
+    }
 }

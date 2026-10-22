@@ -39,7 +39,7 @@ import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 fun PlaylistActionPillsRow(
     isOwnedPlaylist: Boolean,
     isTracksEmpty: Boolean,
-    currentSortOption: PlaylistSortOption,
+    currentSortOrder: PlaylistTrackSort,
     onAddMusicClick: () -> Unit,
     onEditOrderClick: () -> Unit,
     onSortClick: () -> Unit,
@@ -78,7 +78,7 @@ fun PlaylistActionPillsRow(
         // 3. 切换排序
         ActionPill(
             icon = Icons.Rounded.FilterList,
-            label = currentSortOption.label,
+            label = currentSortOrder.label,
             enabled = !isTracksEmpty,
             onClick = onSortClick
         )

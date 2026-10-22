@@ -278,9 +278,10 @@ class PlaylistViewModel(
                     onSuccess = { newTracks ->
                         _uiState.update { state ->
                             if (state is PlaylistUiState.Success && state.playlist.id == playlistId) {
+                                val merged = state.playlist.withLoadedTracks(nextIds, newTracks)
                                 state.copy(
-                                    playlist = state.playlist.withLoadedTracks(nextIds, newTracks),
-                                    pendingTrackIds = state.pendingTrackIds.drop(nextIds.size),
+                                    playlist = merged,
+                                    pendingTrackIds = pendingTrackIds(merged),
                                     isLoadingMoreTracks = false
                                 )
                             } else state
@@ -317,16 +318,14 @@ class PlaylistViewModel(
             pending = pending.drop(chunk.size)
         }
         val addedTracks = detail.tracks.drop(current.playlist.tracks.size)
-        val droppedIds = current.playlist.trackIds.map { it.id }.toSet() - detail.trackIds.map { it.id }.toSet()
+        val completedIds = current.pendingTrackIds.take(current.pendingTrackIds.size - pending.size)
         _uiState.update { state ->
             if (state is PlaylistUiState.Success && state.playlist.id == playlistId) {
                 // 期间用户可能删歌或改序，基于最新状态追加而不是整体覆盖
+                val merged = state.playlist.withLoadedTracks(completedIds, addedTracks)
                 state.copy(
-                    playlist = state.playlist.copy(
-                        tracks = state.playlist.tracks + addedTracks,
-                        trackIds = state.playlist.trackIds.filter { it.id !in droppedIds }
-                    ),
-                    pendingTrackIds = pending,
+                    playlist = merged,
+                    pendingTrackIds = pendingTrackIds(merged),
                     isLoadingMoreTracks = false
                 )
             } else state
@@ -336,26 +335,16 @@ class PlaylistViewModel(
             _toastEvent.emit(error.toUserMessage(resourceProvider))
             return null
         }
-        return loadedTracks
+        return (_uiState.value as? PlaylistUiState.Success)?.playlist?.takeIf { it.id == playlistId }?.tracks
     }
 
     // 补全歌单全部曲目后再执行回调：拖拽排序（全量覆盖会删掉未加载部分）、导入全部歌曲等场景都必须先拿到完整列表，
     // 否则只会处理已加载的这一批，超过1000首的歌单会悄悄漏掉后面的曲目
     fun ensureAllTracksLoaded(onReady: (List<Track>) -> Unit) {
-        val current = _uiState.value as? PlaylistUiState.Success ?: return
-        if (!current.hasMoreTracks) {
-            onReady(current.playlist.tracks)
-            return
-        }
-        if (current.isLoadingMoreTracks) return
-        _uiState.update { state -> if (state is PlaylistUiState.Success) state.copy(isLoadingMoreTracks = true) else state }
-        viewModelScope.launch {
-            val result = loadTracksUntil { false }
-            if (result != null) {
-                onReady(result)
-            } else {
-                _uiState.update { state -> if (state is PlaylistUiState.Success) state.copy(isLoadingMoreTracks = false) else state }
-            }
+        val id = (_uiState.value as? PlaylistUiState.Success)?.playlist?.id ?: return
+        withAllTracks { tracks ->
+            val current = _uiState.value as? PlaylistUiState.Success
+            if (current != null && current.playlist.id == id && !current.hasMoreTracks) onReady(tracks)
         }
     }
 
@@ -395,7 +384,7 @@ class PlaylistViewModel(
             _uiState.update { state ->
                 if (state is PlaylistUiState.Success && state.playlist.id == playlistId) state.copy(isLoadingMoreTracks = true) else state
             }
-            val loaded = try {
+            try {
                 loadTracksUntil { false }
             } finally {
                 _uiState.update { state ->
@@ -404,14 +393,30 @@ class PlaylistViewModel(
             }
             val current = _uiState.value as? PlaylistUiState.Success
             if (current == null || current.playlist.id != playlistId) return@launch
-            action(loaded ?: current.playlist.tracks)
+            // Loading can overlap an add/remove operation. Use the latest merged state rather
+            // than the request's initial snapshot, so new songs are included and deleted ones stay out.
+            action(current.playlist.tracks)
         }
     }
 
     // 播放全部：需要时先补全全部曲目，shuffle 为真则打乱后起播
-    fun playAll(shuffle: Boolean) {
+    fun playAll(shuffle: Boolean) = playAll(shuffle, { it })
+
+    fun playAll(shuffle: Boolean, orderTracks: (List<Track>) -> List<Track>, toggleIfSameQueue: Boolean = false,
+        requireComplete: () -> Boolean = { false }) {
         withAllTracks { tracks ->
-            val ordered = if (shuffle) tracks.shuffled() else tracks
+            if (requireComplete() && (_uiState.value as? PlaylistUiState.Success)?.hasMoreTracks != false) return@withAllTracks
+            val sorted = orderTracks(tracks)
+            val playlist = (_uiState.value as? PlaylistUiState.Success)?.playlist
+            val source = playerManager.playSource.value
+            val kind = if (isAlbumMode) PlaySource.Kind.ALBUM else PlaySource.Kind.PLAYLIST
+            if (toggleIfSameQueue && source?.id == playlist?.id && source?.kind == kind &&
+                com.lin0721.linmusic.feature.playlist.presentation.playlistQueueMatches(
+                    playerManager.queue.value.map { it.songId }, sorted.map { it.id }, shuffle)) {
+                playerManager.togglePlayPause()
+                return@withAllTracks
+            }
+            val ordered = if (shuffle) sorted.shuffled() else sorted
             viewModelScope.launch {
                 // 离线时从第一首可播放的歌曲起播
                 val unplayable = offlinePlayability.unplayableIds(ordered.map { it.id })
@@ -421,10 +426,15 @@ class PlaylistViewModel(
     }
 
     // 点击某首歌起播：队列必须包含歌单全部曲目，而不只是已滚动加载的部分
-    fun playTrackInPlaylist(track: Track) {
+    fun playTrackInPlaylist(track: Track) = playTrackInPlaylist(track, { it })
+
+    fun playTrackInPlaylist(track: Track, orderTracks: (List<Track>) -> List<Track>, requireComplete: () -> Boolean = { false }) {
         // 离线时置灰曲目点击无响应
         if (track.id in unplayableIds.value) return
-        withAllTracks { tracks -> playSongInList(track, tracks) }
+        withAllTracks { tracks ->
+            if (requireComplete() && (_uiState.value as? PlaylistUiState.Success)?.hasMoreTracks != false) return@withAllTracks
+            playSongInList(track, orderTracks(tracks))
+        }
     }
 
     // 全部加入下一首播放
