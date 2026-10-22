@@ -87,7 +87,7 @@ fun LocalMusicSettingsScreen(
             )
         ) {
             item(key = "associations") {
-                SettingsGroupCard("本地音频关联") {
+                SettingsGroupCard("音乐匹配与关联") {
                     LocalMatchingSettingsEntry()
                     LocalAudioAssociationTransferOptions()
                 }

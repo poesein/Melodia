@@ -171,7 +171,7 @@ private fun MainSettingsMenu(
     ) {
         // 多级设置菜单入口组
         item {
-            SettingsGroupCard("本地音频") { LocalMatchingSettingsEntry() }
+            SettingsGroupCard("个人音乐库") { LocalMatchingSettingsEntry() }
         }
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -280,7 +280,13 @@ fun SettingsGroupCard(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = MelodiaSpacing.xs, bottom = MelodiaSpacing.sm)
         )
-        Column(content = content)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = MaterialTheme.shapes.medium
+        ) {
+            Column(modifier = Modifier.padding(horizontal = MelodiaSpacing.md), content = content)
+        }
     }
 }
 
