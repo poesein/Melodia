@@ -3,6 +3,7 @@ package com.lin0721.linmusic.feature.library.textimport
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.lifecycle.viewModelScope
 import com.lin0721.linmusic.core.auth.UserPreferences
 import com.lin0721.linmusic.core.auth.UserProfile
 import com.lin0721.linmusic.core.model.Artist
@@ -23,13 +24,18 @@ import com.lin0721.linmusic.feature.search.domain.SearchResultItem
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -59,6 +65,8 @@ class PlaylistTextImportViewModelTest {
         var freshReads = 0
         var targetOwner = 1L
         var availablePlaylists = listOf(UserPlaylist(id = 50, name = "已有歌单", userId = 1))
+        var targetDelayMs = 0L
+        var targetReadCompleted = false
         var createdName = ""
 
         private val search = Proxy.newProxyInstance(SearchRepository::class.java.classLoader, arrayOf(SearchRepository::class.java)) { _, method, args ->
@@ -95,7 +103,12 @@ class PlaylistTextImportViewModelTest {
                 trackIds = existing.map { PlaylistTrackId(it) }))
         } as PlaylistApi
         private val userPlaylists = object : UserPlaylistRepository {
-            override fun getUserPlaylists(uid: Long, limit: Int) = flowOf(Result.success(availablePlaylists))
+            override fun getUserPlaylists(uid: Long, limit: Int) = flow {
+                val response = availablePlaylists
+                delay(targetDelayMs)
+                targetReadCompleted = true
+                emit(Result.success(response))
+            }
             override fun updatePlaylistOrder(playlistIds: List<Long>) = flowOf(Result.failure<Unit>(IllegalStateException("Not used")))
             override fun setPlaylistTop(playlistId: Long, top: Boolean) = flowOf(Result.failure<Unit>(IllegalStateException("Not used")))
         }
@@ -191,6 +204,58 @@ class PlaylistTextImportViewModelTest {
             assertEquals(0, f.creates)
             f.vm.reset()
         } finally { Dispatchers.resetMain() }
+    }
+
+    @Test fun replacingPreviewCancelsItsOutstandingDestinationRead() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val f = Fixture()
+        try {
+            f.load()
+            f.targetDelayMs = 1_000L
+            f.vm.loadTargets()
+            runCurrent()
+            assertTrue(f.vm.state.value.loadingTargets)
+            f.vm.loadText("Muse-Starlight")
+            // Parsing runs on Dispatchers.Default, outside TestCoroutineScheduler's virtual clock.
+            val state = f.vm.state.first { it.fileName == "粘贴的文本" && it.rows.isNotEmpty() && !it.loading && !it.matching }
+            advanceUntilIdle()
+            assertEquals("粘贴的文本", state.fileName)
+            assertEquals(10L, state.rows.single().selected?.id)
+            assertFalse(f.targetReadCompleted)
+            assertTrue(state.targetPlaylists.isEmpty())
+            assertFalse(state.loadingTargets)
+            assertNull(state.targetError)
+        } finally {
+            f.vm.viewModelScope.coroutineContext[Job]!!.cancelAndJoin()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun newAccountPreviewCannotReceiveOldAccountsDestinations() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val f = Fixture()
+        try {
+            f.load()
+            f.targetDelayMs = 1_000L
+            f.vm.loadTargets()
+            runCurrent()
+            f.preferences.saveUserProfile(UserProfile(2, "other account", ""))
+            f.vm.loadText("Starlight-Muse")
+            f.vm.state.first { it.fileName == "粘贴的文本" && it.rows.isNotEmpty() && !it.loading && !it.matching }
+            advanceUntilIdle()
+            assertTrue(f.vm.state.value.targetPlaylists.isEmpty())
+            assertNull(f.vm.state.value.targetError)
+            f.availablePlaylists = listOf(UserPlaylist(id = 70, name = "新账户歌单", userId = 2))
+            f.targetDelayMs = 0L
+            f.vm.loadTargets()
+            advanceUntilIdle()
+            assertEquals(listOf(70L), f.vm.state.value.targetPlaylists.map { it.id })
+            assertEquals(0, f.creates)
+            assertTrue(f.additions.isEmpty())
+        } finally {
+            f.vm.viewModelScope.coroutineContext[Job]!!.cancelAndJoin()
+            Dispatchers.resetMain()
+        }
     }
 
     @Test fun unresolvedArtistFirstQueryRetriesOppositeOrderAndMergesCandidates() = runTest {

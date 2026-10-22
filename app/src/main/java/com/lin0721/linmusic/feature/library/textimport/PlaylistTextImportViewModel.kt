@@ -132,9 +132,15 @@ class PlaylistTextImportViewModel(
     private fun loadContent(sourceName: String, playlistName: String, parseRows: () -> List<TextPlaylistRow>) {
         if (_state.value.selectionLocked) return
         val previous = matchJob
+        val previousTargets = targetJob
         previous?.cancel()
+        previousTargets?.cancel()
+        targetJob = null
         matchJob = viewModelScope.launch {
             previous?.join()
+            // Destination reads belong to the old preview/account too. Retire their result and
+            // finally block before publishing a new session, so they cannot overwrite its targets.
+            previousTargets?.join()
             _state.value = PlaylistTextImportState(fileName = sourceName, loading = true)
             writer = PlaylistTextWriter()
             accountId = null
