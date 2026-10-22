@@ -19,6 +19,12 @@ import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogUiState
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogStatus
 
 // 专辑 Tab: 采用精致的行模式展示，滚动到底自动追加下一页
+enum class ArtistAlbumSortOrder(val label: String) {
+    DEFAULT("默认顺序"),
+    NEWEST("发布时间：从新到旧"),
+    OLDEST("发布时间：从旧到新")
+}
+
 fun LazyListScope.artistAlbumTab(
     albums: List<ArtistAlbum>,
     sourceAlbumCount: Int,
@@ -27,7 +33,8 @@ fun LazyListScope.artistAlbumTab(
     catalogSelection: ArtistCatalogSelection?,
     onCatalogSettings: () -> Unit,
     onCatalogRetry: () -> Unit,
-    onRestoreAll: () -> Unit,
+    sortOrder: ArtistAlbumSortOrder,
+    onSortOrderChanged: (ArtistAlbumSortOrder) -> Unit,
     hasMore: Boolean,
     loadingMore: Boolean,
     loadError: String?,
@@ -50,7 +57,6 @@ fun LazyListScope.artistAlbumTab(
             Row {
                 TextButton(onClick = onCatalogSettings) { Text("资料库设置") }
                 if (catalogState.error != null) TextButton(onClick = onCatalogRetry, enabled = !catalogState.loading) { Text("重试") }
-                TextButton(onClick = onRestoreAll, enabled = !catalogState.saving) { Text("恢复全部") }
             }
         }
     }
@@ -62,6 +68,20 @@ fun LazyListScope.artistAlbumTab(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp
             )
+        }
+    }
+    if (albums.size > 1) item(key = "artist_album_sort") {
+        val sortMenuExpanded = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        Box(Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md), contentAlignment = Alignment.CenterEnd) {
+            TextButton(onClick = { sortMenuExpanded.value = true }) { Text("排序：${sortOrder.label} ▾") }
+            androidx.compose.material3.DropdownMenu(expanded = sortMenuExpanded.value, onDismissRequest = { sortMenuExpanded.value = false }) {
+                ArtistAlbumSortOrder.entries.forEach { option ->
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(option.label) },
+                        onClick = { sortMenuExpanded.value = false; onSortOrderChanged(option) }
+                    )
+                }
+            }
         }
     }
     items(albums, key = { it.id }) { album ->

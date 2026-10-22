@@ -952,6 +952,13 @@ fun PlaylistScreen(
                         playlist.id != userProfile?.uid
 
                     val menuItems = buildList {
+                        if (isLikedSongsPlaylistView) add(PlaylistMenuItem(
+                            icon = Icons.Default.Edit,
+                            title = "编辑喜欢的歌曲"
+                        ) {
+                            showMoreMenuSheet = false
+                            viewModel.enterSelection()
+                        })
                         if (isAlbum) add(PlaylistMenuItem(
                             icon = Icons.Default.Link,
                             title = "关联本地专辑（专辑内匹配）"
@@ -962,7 +969,7 @@ fun PlaylistScreen(
                                     playlist.tracks.firstOrNull()?.ar.orEmpty()
                                 }), playlist.tracks)
                         })
-                        add(
+                        if (!isLikedSongsPlaylistView) add(
                             PlaylistMenuItem(
                                 icon = if (successState.isSubscribed) Icons.Rounded.CheckCircle else Icons.Rounded.AddCircleOutline,
                                 title = if (successState.isSubscribed) "取消收藏$resourceLabel" else "收藏$resourceLabel"

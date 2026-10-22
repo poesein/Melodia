@@ -117,6 +117,7 @@ fun ArtistContent(
     var showMoreMenuSheet by remember { mutableStateOf(false) }
     var showAlbumMinimumDialog by remember { mutableStateOf(false) }
     var showCatalogSheet by remember { mutableStateOf(false) }
+    var albumSortOrder by rememberSaveable { mutableStateOf(ArtistAlbumSortOrder.DEFAULT) }
     val catalogSelection = remember(albums, catalogState.enabled, catalogState.groups, catalogState.artistMbid, albumMinTracks) {
         catalogState.groups?.takeIf { catalogState.enabled }?.let {
             ArtistCatalogMatcher.select(albums, it, boundArtistMbid = catalogState.artistMbid, minTracks = albumMinTracks)
@@ -124,6 +125,14 @@ fun ArtistContent(
     }
     val visibleAlbums = remember(albums, catalogSelection, albumMinTracks) {
         ArtistAlbumSelection.visibleAlbums(catalogSelection?.albums ?: albums, albumMinTracks)
+    }
+
+    val sortedVisibleAlbums = remember(visibleAlbums, albumSortOrder) {
+        when (albumSortOrder) {
+            ArtistAlbumSortOrder.DEFAULT -> visibleAlbums
+            ArtistAlbumSortOrder.NEWEST -> visibleAlbums.sortedWith(compareBy<ArtistAlbum> { it.publishTime <= 0L }.thenByDescending { it.publishTime })
+            ArtistAlbumSortOrder.OLDEST -> visibleAlbums.sortedWith(compareBy<ArtistAlbum> { it.publishTime <= 0L }.thenBy { it.publishTime })
+        }
     }
 
     var dominantColor by remember { mutableStateOf(CoverPlaceholderDark) }
@@ -284,14 +293,15 @@ fun ArtistContent(
                         onRequireLogin = onRequireLogin
                     )
                     1 -> artistAlbumTab(
-                        albums = visibleAlbums,
+                        albums = sortedVisibleAlbums,
                         sourceAlbumCount = albums.size,
                         minTracks = albumMinTracks,
                         catalogState = catalogState,
                         catalogSelection = catalogSelection,
                         onCatalogSettings = { showCatalogSheet = true },
                         onCatalogRetry = onCatalogRetry,
-                        onRestoreAll = { onCatalogEnabledChanged(false); onAlbumMinTracksChanged(0) },
+                        sortOrder = albumSortOrder,
+                        onSortOrderChanged = { albumSortOrder = it },
                         hasMore = albumsHasMore,
                         loadingMore = albumsLoadingMore,
                         loadError = albumsLoadError,

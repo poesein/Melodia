@@ -85,7 +85,7 @@ fun ArtistCatalogSheet(
                 ArtistCatalogStatus(state, selection)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onRetry, enabled = !state.loading && !state.saving) { Text("重试资料库") }
-                    if (state.artistMbid != null) TextButton(onClick = onChangeBinding, enabled = !state.saving) { Text("更换资料库歌手") }
+                    if (state.artistMbid != null) TextButton(onClick = onChangeBinding, enabled = !state.saving) { Text("手动修正资料库歌手") }
                     TextButton(onClick = onRestoreAll, enabled = !state.saving) { Text("恢复全部专辑") }
                 }
                 if (state.choosingArtist || state.artistMbid == null) {
