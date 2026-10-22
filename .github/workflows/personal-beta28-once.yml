@@ -2,10 +2,7 @@ name: Personal beta.28 APK (one-time)
 
 # One-shot signed APK build. Trigger only when this workflow file changes.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/personal-beta28-once.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
