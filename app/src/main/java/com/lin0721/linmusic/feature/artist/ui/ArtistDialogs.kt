@@ -1,6 +1,8 @@
 package com.lin0721.linmusic.feature.artist.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -12,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -20,6 +23,7 @@ import com.lin0721.linmusic.core.ui.components.MelodiaDragHandle
 import com.lin0721.linmusic.core.ui.theme.BottomSheetShape
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.core.model.ArtistDetailInfo
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
 
 // ────────────────────────────────────────────────────────────────────────────
 // 艺人简介 Dialog
@@ -66,17 +70,18 @@ fun ArtistBioDialog(
 @Composable
 fun ArtistMoreMenuSheet(
     isBlocked: Boolean,
-    albumMinTracks: Int,
-    albumHasCustomMinimum: Boolean,
-    onChangeAlbumMinimum: () -> Unit,
     catalogEnabled: Boolean,
     catalogUsesDefault: Boolean = true,
+    catalogSaving: Boolean = false,
     onCatalogSettings: () -> Unit,
     onManualCorrections: () -> Unit,
+    onRestoreAll: () -> Unit,
     onBlockClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { scrollState.canScrollForward }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -88,6 +93,8 @@ fun ArtistMoreMenuSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .nestedScroll(boundary)
+                .verticalScroll(scrollState)
                 .padding(horizontal = MelodiaSpacing.lg, vertical = MelodiaSpacing.md)
         ) {
             Text(
@@ -97,10 +104,6 @@ fun ArtistMoreMenuSheet(
                 fontWeight = FontWeight.ExtraBold,
                 modifier = Modifier.padding(bottom = MelodiaSpacing.md)
             )
-
-            TextButton(onClick = { onDismiss(); onManualCorrections() }, modifier = Modifier.fillMaxWidth()) {
-                Text("手动修正专辑（添加 / 隐藏）")
-            }
 
             Row(
                 modifier = Modifier.fillMaxWidth().clickable {
@@ -114,7 +117,7 @@ fun ArtistMoreMenuSheet(
                     modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(MelodiaSpacing.md))
                 Column {
-                    Text("主要录音室专辑（资料库）", color = MaterialTheme.colorScheme.onSurface,
+                    Text("资料库设置", color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     val catalogSource = if (catalogUsesDefault) "跟随全局" else "此歌手单独设置"
                     Text("${if (catalogEnabled) "已开启" else "已关闭"} · $catalogSource",
@@ -122,29 +125,12 @@ fun ArtistMoreMenuSheet(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth().clickable {
-                    onDismiss()
-                    onChangeAlbumMinimum()
-                }.padding(vertical = MelodiaSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Album,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(Modifier.width(MelodiaSpacing.md))
-                Column {
-                    Text("专辑最少曲数", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    val source = if (albumHasCustomMinimum) "此歌手单独设置" else "使用默认值"
-                    Text(
-                        if (albumMinTracks == 0) "不限制曲数 · $source" else "至少 $albumMinTracks 首 · $source",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp
-                    )
-                }
+            TextButton(onClick = { onDismiss(); onManualCorrections() }, modifier = Modifier.fillMaxWidth()) {
+                Text("手动修正")
+            }
+            TextButton(onClick = { onDismiss(); onRestoreAll() }, enabled = catalogEnabled && !catalogSaving,
+                modifier = Modifier.fillMaxWidth()) {
+                Text("恢复全部")
             }
 
             Row(

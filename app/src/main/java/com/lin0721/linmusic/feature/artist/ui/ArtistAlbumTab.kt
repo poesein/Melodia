@@ -16,54 +16,23 @@ import com.lin0721.linmusic.core.model.ArtistAlbum
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogSelection
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogUiState
-import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogStatus
 
 // 专辑 Tab: 采用精致的行模式展示，滚动到底自动追加下一页
 fun LazyListScope.artistAlbumTab(
     albums: List<ArtistAlbum>,
-    sourceAlbumCount: Int,
-    minTracks: Int,
     catalogState: ArtistCatalogUiState,
     catalogSelection: ArtistCatalogSelection?,
-    onCatalogSettings: () -> Unit,
-    onCatalogRetry: () -> Unit,
-    onManualCorrections: () -> Unit,
-    correctionCount: Int,
-    correctionsApplied: Boolean,
-    onRestoreAll: () -> Unit,
     hasMore: Boolean,
     loadingMore: Boolean,
     loadError: String?,
     onRetry: () -> Unit,
     onAlbumClick: (Long) -> Unit
 ) {
-    if (catalogState.enabled) item(key = "artist_catalog_summary") {
-        Column(Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm)) {
-            Text("主要录音室专辑 · MusicBrainz", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
-            ArtistCatalogStatus(catalogState, catalogSelection)
+    // Keep browsing compact; diagnostics and all controls live in the artist menu.
+    if (catalogState.enabled && catalogSelection != null) {
+        item(key = "artist_catalog_summary") {
             Text(
-                when {
-                    loadError != null -> "网易云专辑列表尚未读完，已加载 $sourceAlbumCount 张；请重试加载。"
-                    hasMore -> "正在读取完整专辑列表…已加载 $sourceAlbumCount 张"
-                    else -> "已读取完整网易云专辑列表，共 $sourceAlbumCount 张"
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp
-            )
-            Row {
-                TextButton(onClick = onCatalogSettings) { Text("资料库设置") }
-                TextButton(onClick = onManualCorrections) { Text("手动修正") }
-                if (catalogState.error != null) TextButton(onClick = onCatalogRetry, enabled = !catalogState.loading) { Text("重试") }
-                TextButton(onClick = onRestoreAll, enabled = !catalogState.saving) { Text("恢复全部") }
-            }
-            if (correctionCount > 0) Text("已保存 $correctionCount 项手动修正 · ${if (correctionsApplied) "正在应用" else "暂未应用"}",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-    if (minTracks > 0) {
-        item(key = "artist_album_filter_summary") {
-            Text(
-                "只显示至少 $minTracks 首歌曲的专辑",
+                "匹配${catalogSelection.matchedCount}·未识别${catalogSelection.unmatchedCount}·合并${catalogSelection.duplicateCount}·排除${catalogSelection.excludedCount}",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp
@@ -83,8 +52,7 @@ fun LazyListScope.artistAlbumTab(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    if (catalogSelection != null) "未识别到符合条件的主要录音室专辑，可恢复全部或检查资料库歌手。"
-                    else if (minTracks > 0) "暂无至少 $minTracks 首的专辑，可在歌手菜单调整曲数" else "暂无专辑",
+                    if (catalogSelection != null) "暂无匹配专辑" else "暂无专辑",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp
                 )
@@ -103,11 +71,6 @@ fun LazyListScope.artistAlbumTab(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp
                 )
-                if (minTracks > 0 && albums.isEmpty()) {
-                    Spacer(Modifier.width(MelodiaSpacing.sm))
-                    Text(if (catalogSelection != null) "继续查找主要录音室专辑…" else "继续查找符合曲数的专辑…",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                }
             }
         }
     }

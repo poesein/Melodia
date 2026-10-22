@@ -18,7 +18,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.CloudQueue
@@ -311,7 +311,7 @@ private fun BottomBarItemEditorRow(
 // 候选项目对应图标映射
 fun bottomBarItemIcon(item: BottomBarItem): ImageVector = when (item) {
     BottomBarItem.HOME -> Icons.Default.Home
-    BottomBarItem.MUSIC -> Icons.Default.MusicNote
+    BottomBarItem.ALBUMS -> Icons.Default.Album
     BottomBarItem.PERSONAL_LIBRARY -> Icons.Default.LibraryMusic
     BottomBarItem.SEARCH -> Icons.Default.Search
     BottomBarItem.LIBRARY -> Icons.Default.LibraryMusic

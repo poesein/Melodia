@@ -123,7 +123,7 @@ internal fun ArtistAlbumCorrectionsContent(
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else if (!choices.enabled) Text("当前使用自动结果。重新应用即可恢复此前添加和隐藏的专辑。",
                         style = MaterialTheme.typography.bodySmall)
-                    else Text("手动添加优先于资料库分类和最低曲数；记录随修改自动保存。",
+                    else Text("手动添加和隐藏优先于资料库分类；记录随修改自动保存。",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     state.error?.let { message ->
                         Row(verticalAlignment = Alignment.CenterVertically) {

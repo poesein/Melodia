@@ -1,6 +1,6 @@
 package com.lin0721.linmusic.feature.settings.ui
 
-import com.lin0721.linmusic.feature.localmusic.ui.LocalMatchingSettingsEntry
+import com.lin0721.linmusic.feature.localmusic.ui.settings.LocalMusicSettingsScreen
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,20 +44,37 @@ import kotlinx.coroutines.flow.collectLatest
 import org.koin.androidx.compose.koinViewModel
 import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 
-// 定义多级菜单类型。sectionTitles 与子页面 SettingsGroupCard 的标题及顺序一致，子页面按下标引用；主菜单预览取前两项
+// Functional pages keep their existing preference owners; this enum only describes navigation.
 enum class SettingsSubMenu(val title: String, val sectionTitles: List<String>, val icon: ImageVector) {
+    DISPLAY_LAYOUT("页面与布局", listOf("音乐库页面", "底部页面", "播放页布局", "界面显示"), Icons.Outlined.Dashboard),
     PERSONAL_LIBRARY("个人音乐库", listOf("显示歌单", "布局与栏目"), Icons.Outlined.LibraryMusic),
+    ALBUMS("收藏专辑页", listOf("封面布局"), Icons.Outlined.Album),
+    LOCAL_AUDIO("本地音乐与匹配", listOf("本地优先播放", "歌曲与专辑关联", "扫描与本地页面"), Icons.Outlined.Folder),
+    LOCAL_LIBRARY("本地音乐设置", listOf("扫描目录", "本地页面"), Icons.Outlined.Folder),
+    ARTIST_ALBUMS("歌手专辑筛选", listOf("主要录音室专辑"), Icons.Outlined.FilterAlt),
     PLAYBACK_DOWNLOAD("播放与下载", listOf("播放参数", "下载与缓存"), Icons.Outlined.PlayCircleOutline),
     AUDIO_QUALITY("音质", listOf("默认音质", "播放页显示"), Icons.Outlined.HighQuality),
     AUDIO_SOURCES("音源设置", listOf("换源基础设置", "社区扩展源", "远程 UNM 服务"), Icons.AutoMirrored.Outlined.QueueMusic),
     PRIVACY("隐私设置", emptyList(), Icons.Outlined.PrivacyTip),
     STORAGE("储存空间", listOf("存储管理"), Icons.Outlined.Storage),
     NETWORK("网络设置", listOf("网络连接", "网络代理"), Icons.Outlined.Wifi),
-    EXTENSIONS("扩展", listOf("悬浮与桌面", "设备与集成", "底部导航栏", "平板布局", "显示", "歌手专辑"), Icons.Outlined.Extension),
+    EXTENSIONS("设备集成", listOf("锁屏控制", "车载蓝牙"), Icons.Outlined.Devices),
     LYRICS("歌词设置", listOf("全屏歌词", "悬浮歌词", "外部与系统歌词"), Icons.Outlined.Subtitles),
     ABOUT("关于", listOf("版本更新", "应用说明与协议", "诊断与日志", "特别感谢"), Icons.Outlined.Info);
 
     val subtitle: String get() = sectionTitles.take(2).joinToString("、")
+}
+
+private val MainSettingsGroups = listOf(
+    "音乐库与页面" to listOf(SettingsSubMenu.DISPLAY_LAYOUT, SettingsSubMenu.LOCAL_AUDIO, SettingsSubMenu.ARTIST_ALBUMS),
+    "播放与音源" to listOf(SettingsSubMenu.PLAYBACK_DOWNLOAD, SettingsSubMenu.AUDIO_QUALITY, SettingsSubMenu.AUDIO_SOURCES, SettingsSubMenu.LYRICS),
+    "系统与应用" to listOf(SettingsSubMenu.EXTENSIONS, SettingsSubMenu.NETWORK, SettingsSubMenu.PRIVACY, SettingsSubMenu.STORAGE, SettingsSubMenu.ABOUT)
+)
+
+private fun SettingsSubMenu.parentMenu(): SettingsSubMenu? = when (this) {
+    SettingsSubMenu.PERSONAL_LIBRARY, SettingsSubMenu.ALBUMS -> SettingsSubMenu.DISPLAY_LAYOUT
+    SettingsSubMenu.LOCAL_LIBRARY -> SettingsSubMenu.LOCAL_AUDIO
+    else -> null
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,11 +84,11 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = koinViewModel()
 ) {
     val context = LocalContext.current
-    var activeSubMenu by remember { mutableStateOf<SettingsSubMenu?>(null) }
+    var activeSubMenu by rememberSaveable { mutableStateOf<SettingsSubMenu?>(null) }
 
     // 全局浮层开着时让位，避免抢先吞掉本该用来关浮层的返回事件
     BackHandler(enabled = activeSubMenu != null && !LocalGlobalOverlayOpen.current) {
-        activeSubMenu = null
+        activeSubMenu = activeSubMenu?.parentMenu()
     }
     
     // 监听 Toast 提示消息
@@ -78,6 +96,12 @@ fun SettingsScreen(
         viewModel.toastEvent.collectLatest { msg ->
             ToastManager.showToast(msg)
         }
+    }
+
+    // Reuse the local library's own screen and ViewModel rather than duplicating its scanner UI.
+    if (activeSubMenu == SettingsSubMenu.LOCAL_LIBRARY) {
+        LocalMusicSettingsScreen(onBack = { activeSubMenu = SettingsSubMenu.LOCAL_AUDIO })
+        return
     }
 
     Scaffold(
@@ -95,7 +119,7 @@ fun SettingsScreen(
                     MelodiaIconButton(
                         onClick = {
                             if (activeSubMenu != null) {
-                                activeSubMenu = null
+                                activeSubMenu = activeSubMenu?.parentMenu()
                             } else {
                                 onBack()
                             }
@@ -146,7 +170,8 @@ fun SettingsScreen(
                     SubMenuContent(
                         subMenu = subMenu,
                         viewModel = viewModel,
-                        context = context
+                        context = context,
+                        onNavigate = { activeSubMenu = it }
                     )
                 }
             }
@@ -168,20 +193,16 @@ private fun MainSettingsMenu(
         verticalArrangement = Arrangement.spacedBy(MelodiaSpacing.md),
         contentPadding = PaddingValues(bottom = LocalBottomOverlayInset.current + 16.dp, top = 8.dp)
     ) {
-        // 多级设置菜单入口组
-        item {
-            SettingsGroupCard("本地音频") { LocalMatchingSettingsEntry() }
-        }
-        item {
+        MainSettingsGroups.forEach { (groupTitle, menus) -> item(key = groupTitle) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "常规设置",
+                    text = groupTitle,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(start = MelodiaSpacing.xs, bottom = MelodiaSpacing.sm)
                 )
-                SettingsSubMenu.values().forEach { item ->
+                menus.forEach { item ->
                     SettingsMainMenuRow(
                         icon = item.icon,
                         title = item.title,
@@ -190,7 +211,7 @@ private fun MainSettingsMenu(
                     )
                 }
             }
-        }
+        } }
 
         // 底部账户操作按钮组
         item {
@@ -243,7 +264,8 @@ private fun MainSettingsMenu(
 private fun SubMenuContent(
     subMenu: SettingsSubMenu,
     viewModel: SettingsViewModel,
-    context: Context
+    context: Context,
+    onNavigate: (SettingsSubMenu) -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -251,7 +273,12 @@ private fun SubMenuContent(
             .padding(horizontal = MelodiaSpacing.md)
     ) {
         when (subMenu) {
+            SettingsSubMenu.DISPLAY_LAYOUT -> DisplaySettingsView(viewModel, onNavigate)
             SettingsSubMenu.PERSONAL_LIBRARY -> com.lin0721.linmusic.feature.personallibrary.PersonalLibrarySettingsView()
+            SettingsSubMenu.ALBUMS -> com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsSettingsView()
+            SettingsSubMenu.LOCAL_AUDIO -> LocalAudioSettingsView(viewModel, onOpenLibrarySettings = { onNavigate(SettingsSubMenu.LOCAL_LIBRARY) })
+            SettingsSubMenu.LOCAL_LIBRARY -> Unit // Rendered above the shared settings Scaffold.
+            SettingsSubMenu.ARTIST_ALBUMS -> ArtistAlbumsSettingsView(viewModel)
             SettingsSubMenu.PLAYBACK_DOWNLOAD -> PlaybackDownloadSettingsView(viewModel)
             SettingsSubMenu.AUDIO_QUALITY -> AudioQualitySettingsView(viewModel)
             SettingsSubMenu.AUDIO_SOURCES -> AudioSourcesSettingsView(viewModel)

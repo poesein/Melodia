@@ -3,7 +3,7 @@ package com.lin0721.linmusic.core.preferences
 // 移动端及大屏底部导航栏候选项目
 enum class BottomBarItem(val key: String, val title: String, val isRoute: Boolean) {
     HOME("home", "主页", true),
-    MUSIC("music", "音乐", true),
+    ALBUMS("albums", "专辑", true),
     SEARCH("search", "搜索", true),
     LIBRARY("library", "音乐库", true),
     PERSONAL_LIBRARY("personal_library", "个人音乐库", true),
@@ -16,6 +16,8 @@ enum class BottomBarItem(val key: String, val title: String, val isRoute: Boolea
     companion object {
         fun fromKey(key: String): BottomBarItem? = when (key) {
             "account" -> PROFILE
+            // Reuse the retired personal music entry's position and explicit visibility.
+            "music" -> ALBUMS
             else -> entries.firstOrNull { it.key == key }
         }
     }
@@ -33,7 +35,7 @@ object BottomBarLayout {
 
     val DEFAULT: List<BottomBarItemSetting> = listOf(
         BottomBarItemSetting(BottomBarItem.HOME, true),
-        BottomBarItemSetting(BottomBarItem.MUSIC, true),
+        BottomBarItemSetting(BottomBarItem.ALBUMS, true),
         BottomBarItemSetting(BottomBarItem.SEARCH, true),
         BottomBarItemSetting(BottomBarItem.LIBRARY, true),
         BottomBarItemSetting(BottomBarItem.PERSONAL_LIBRARY, true),
@@ -62,7 +64,7 @@ object BottomBarLayout {
             val item = BottomBarItem.fromKey(parts[0].trim()) ?: return@mapNotNull null
             BottomBarItemSetting(item, visible = parts.getOrNull(1)?.trim() == "1")
         }
-        return normalize(migratePersonalLibraryEntry(migrateMusicEntry(parsed)))
+        return normalize(migratePersonalLibraryEntry(migrateAlbumsEntry(parsed)))
     }
 
     private fun migratePersonalLibraryEntry(layout: List<BottomBarItemSetting>): List<BottomBarItemSetting> {
@@ -75,14 +77,14 @@ object BottomBarLayout {
         return migrated
     }
 
-    private fun migrateMusicEntry(layout: List<BottomBarItemSetting>): List<BottomBarItemSetting> {
-        if (layout.any { it.item == BottomBarItem.MUSIC }) return layout
+    private fun migrateAlbumsEntry(layout: List<BottomBarItemSetting>): List<BottomBarItemSetting> {
+        if (layout.any { it.item == BottomBarItem.ALBUMS }) return layout
         val migrated = layout.toMutableList()
         val homeIndex = migrated.indexOfFirst { it.item == BottomBarItem.HOME }
         // Preserve all selected items in a full custom layout; the new entry can
         // be enabled explicitly in settings. Legacy defaults have room for it.
         migrated.add(if (homeIndex >= 0) homeIndex + 1 else 0,
-            BottomBarItemSetting(BottomBarItem.MUSIC, layout.count { it.visible } < 5))
+            BottomBarItemSetting(BottomBarItem.ALBUMS, layout.count { it.visible } < 5))
         return migrated
     }
 

@@ -1,7 +1,6 @@
 package com.lin0721.linmusic.feature.artist.domain.catalog
 
 import com.lin0721.linmusic.core.model.ArtistAlbum
-import com.lin0721.linmusic.feature.artist.domain.ArtistAlbumSelection
 import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.serialization.Serializable
@@ -86,36 +85,33 @@ class ArtistCatalogMatcherTest {
     }
 
     @Test
-    fun qualifyingEditionIsSelectedBeforeMinimumTrackFilterAndResetRestoresOriginal() {
+    fun originalEditionIsKeptEvenWhenItHasFewerTracksThanTheDeluxeEdition() {
         val source = listOf(album(1, "A", size = 7), album(2, "A (Deluxe Edition)", size = 12))
         val catalog = listOf(group("a", "A"))
-        val filtered = ArtistCatalogMatcher.select(source, catalog, minTracks = 8)
-        assertEquals(listOf(2L), ArtistAlbumSelection.visibleAlbums(filtered.albums, 8).map { it.id })
-        assertEquals(listOf(1L), filtered.duplicateAlbums.map { it.id })
+        val filtered = ArtistCatalogMatcher.select(source, catalog)
+        assertEquals(listOf(1L), filtered.albums.map { it.id })
+        assertEquals(listOf(2L), filtered.duplicateAlbums.map { it.id })
         assertEquals(2, filtered.matchedCount + filtered.duplicateCount)
         assertTrue(filtered.unmatchedReleaseGroups.isEmpty())
-        assertEquals(listOf(1L), ArtistCatalogMatcher.select(source, catalog, minTracks = 0).albums.map { it.id })
         assertEquals(listOf(1L, 2L), source.map { it.id })
     }
 
     @Test
-    fun unknownCountDoesNotHideAKnownQualifyingEditionButZeroPreservesOriginal() {
+    fun anUnknownTrackCountDoesNotHideTheOriginalRelease() {
         val source = listOf(album(1, "A", size = 0), album(2, "A (Japanese Edition)", size = 8))
         val catalog = listOf(group("a", "A"))
-        assertEquals(2L, ArtistCatalogMatcher.select(source, catalog, minTracks = 8).albums.single().id)
-        assertEquals(1L, ArtistCatalogMatcher.select(source, catalog, minTracks = -1).albums.single().id)
-        val noQualifyingEdition = ArtistCatalogMatcher.select(source, catalog, minTracks = 9)
-        assertTrue(ArtistAlbumSelection.visibleAlbums(noQualifyingEdition.albums, 9).isEmpty())
-        assertEquals(2, noQualifyingEdition.matchedCount + noQualifyingEdition.duplicateCount)
+        val result = ArtistCatalogMatcher.select(source, catalog)
+        assertEquals(1L, result.albums.single().id)
+        assertEquals(2, result.matchedCount + result.duplicateCount)
     }
 
     @Test
-    fun minimumTrackPreferenceCannotPromoteLiveOrAmbiguousGroups() {
+    fun largeTrackCountsCannotPromoteLiveOrAmbiguousGroups() {
         val source = listOf(album(1, "A", size = 7), album(2, "A (Live)", size = 30), album(3, "B", size = 30))
         val catalog = listOf(group("a", "A"), group("live", "A (Live)", secondary = listOf("Live")),
             group("b1", "B"), group("b2", "B"))
-        val result = ArtistCatalogMatcher.select(source, catalog, minTracks = 8)
-        assertTrue(ArtistAlbumSelection.visibleAlbums(result.albums, 8).isEmpty())
+        val result = ArtistCatalogMatcher.select(source, catalog)
+        assertEquals(listOf(1L), result.albums.map { it.id })
         assertEquals(listOf(2L), result.excludedAlbums.map { it.id })
         assertEquals(listOf(3L), result.ambiguousAlbums.map { it.id })
     }

@@ -28,7 +28,6 @@ import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.core.ui.components.PlaylistCollectItem
 import com.lin0721.linmusic.core.ui.components.PlaylistCollectSheet
 import com.lin0721.linmusic.core.ui.components.PlaylistCollectState
-import com.lin0721.linmusic.core.ui.components.ArtistAlbumMinimumDialog
 import com.lin0721.linmusic.feature.artist.domain.ArtistAlbumSelection
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogArtist
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogMatcher
@@ -66,11 +65,6 @@ fun ArtistContent(
     albumsHasMore: Boolean,
     albumsLoadingMore: Boolean,
     albumsLoadError: String?,
-    albumMinTracks: Int,
-    albumDefaultMinTracks: Int,
-    albumHasCustomMinimum: Boolean,
-    onAlbumMinTracksChanged: (Int) -> Unit,
-    onResetAlbumMinTracks: () -> Unit,
     catalogState: ArtistCatalogUiState,
     correctionsState: ArtistAlbumCorrectionsState,
     onCorrectionsEnabled: (Boolean) -> Unit,
@@ -122,17 +116,14 @@ fun ArtistContent(
     val overlayHeight = 56.dp + melodiaStatusBarTopPadding()
 
     var showMoreMenuSheet by remember { mutableStateOf(false) }
-    var showAlbumMinimumDialog by remember { mutableStateOf(false) }
     var showCatalogSheet by remember { mutableStateOf(false) }
     var showCorrectionsSheet by remember(artist.id) { mutableStateOf(false) }
-    val catalogSelection = remember(albums, catalogState.enabled, catalogState.groups, catalogState.artistMbid, albumMinTracks) {
+    val catalogSelection = remember(albums, catalogState.enabled, catalogState.groups, catalogState.artistMbid) {
         catalogState.groups?.takeIf { catalogState.enabled }?.let {
-            ArtistCatalogMatcher.select(albums, it, boundArtistMbid = catalogState.artistMbid, minTracks = albumMinTracks)
+            ArtistCatalogMatcher.select(albums, it, boundArtistMbid = catalogState.artistMbid)
         }
     }
-    val automaticAlbums = remember(albums, catalogSelection, albumMinTracks) {
-        ArtistAlbumSelection.visibleAlbums(catalogSelection?.albums ?: albums, albumMinTracks)
-    }
+    val automaticAlbums = catalogSelection?.albums ?: albums
     val visibleAlbums = remember(automaticAlbums, albums, correctionsState.value, catalogState.enabled, catalogSelection) {
         correctionsState.value.apply(automaticAlbums, albums, catalogState.enabled, catalogSelection?.matches.orEmpty())
     }
@@ -183,7 +174,7 @@ fun ArtistContent(
         }
     }
     LaunchedEffect(shouldLoadMore, selectedTab, albums.size, albumsHasMore, albumsLoadingMore, albumsLoadError,
-        albumMinTracks, visibleAlbums.size, catalogState.enabled, catalogState.groups) {
+        visibleAlbums.size, catalogState.enabled, catalogState.groups) {
         when (selectedTab) {
             0 -> if (shouldLoadMore && songSearch.active) onLoadMoreSongSearch()
             1 -> if (ArtistAlbumSelection.shouldLoadMore(
@@ -300,16 +291,8 @@ fun ArtistContent(
                     )
                     1 -> artistAlbumTab(
                         albums = visibleAlbums,
-                        sourceAlbumCount = albums.size,
-                        minTracks = albumMinTracks,
                         catalogState = catalogState,
                         catalogSelection = catalogSelection,
-                        onCatalogSettings = { showCatalogSheet = true },
-                        onCatalogRetry = onCatalogRetry,
-                        onManualCorrections = { showCorrectionsSheet = true },
-                        correctionCount = correctionsState.value.entries.size,
-                        correctionsApplied = correctionsState.value.enabled,
-                        onRestoreAll = { onCatalogEnabledChanged(false); onAlbumMinTracksChanged(0) },
                         hasMore = albumsHasMore,
                         loadingMore = albumsLoadingMore,
                         loadError = albumsLoadError,
@@ -405,25 +388,14 @@ fun ArtistContent(
         if (showMoreMenuSheet) {
             ArtistMoreMenuSheet(
                 isBlocked = blockedArtistIds.contains(artist.id),
-                albumMinTracks = albumMinTracks,
-                albumHasCustomMinimum = albumHasCustomMinimum,
-                onChangeAlbumMinimum = { showAlbumMinimumDialog = true },
                 catalogEnabled = catalogState.enabled,
                 catalogUsesDefault = catalogState.enabledOverride == null,
+                catalogSaving = catalogState.saving,
                 onCatalogSettings = { showCatalogSheet = true },
                 onManualCorrections = { showCorrectionsSheet = true },
+                onRestoreAll = { onCatalogEnabledChanged(false) },
                 onBlockClick = onBlockClick,
                 onDismiss = { showMoreMenuSheet = false }
-            )
-        }
-        if (showAlbumMinimumDialog) {
-            ArtistAlbumMinimumDialog(
-                currentMinimum = albumMinTracks,
-                description = "仅为 ${artist.name} 设置，0 首不限制曲数。其他歌手不受影响；默认 $albumDefaultMinTracks 首。",
-                onSave = onAlbumMinTracksChanged,
-                onUseDefault = if (albumHasCustomMinimum) onResetAlbumMinTracks else null,
-                defaultMinimum = albumDefaultMinTracks,
-                onDismiss = { showAlbumMinimumDialog = false }
             )
         }
         if (showCatalogSheet) {
@@ -438,7 +410,7 @@ fun ArtistContent(
                 onBind = onCatalogBind,
                 onChangeBinding = onCatalogChangeBinding,
                 onRetry = onCatalogRetry,
-                onRestoreAll = { onCatalogEnabledChanged(false); onAlbumMinTracksChanged(0) },
+                onRestoreAll = { onCatalogEnabledChanged(false) },
                 onDismiss = { showCatalogSheet = false }
             )
         }

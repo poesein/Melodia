@@ -56,14 +56,12 @@ private val TileGap = 10.dp
 // 偏好与全部曲风共用同一比例，随列宽等比缩放
 private const val TileAspectRatio = 1.7f
 
-// 主页保留官方布局；独立音乐页可额外提供偏好标题同行的搜索和听歌识曲入口。
+// 「音乐」tab 曲风浏览：顶栏由 HomeScreen 统一渲染，点色块进入曲风详情
 @Composable
 fun MusicContent(
     uiState: MusicUiState,
     onStyleClick: (id: Long, name: String) -> Unit,
-    onRetry: () -> Unit,
-    onSearchClick: (() -> Unit)? = null,
-    onRecognitionClick: (() -> Unit)? = null
+    onRetry: () -> Unit
 ) {
     val columns = rememberMelodiaGridColumns(compact = 2, expandedPortrait = 4, expandedLandscape = 5)
 
@@ -72,11 +70,6 @@ fun MusicContent(
         contentPadding = PaddingValues(bottom = LocalBottomOverlayInset.current + 16.dp),
         verticalArrangement = Arrangement.spacedBy(TileGap)
     ) {
-        if (onSearchClick != null) {
-            item(key = "preference_title") {
-                MusicSectionTitle("你的偏好", onSearchClick = onSearchClick, onRecognitionClick = onRecognitionClick)
-            }
-        }
         when (uiState) {
             is MusicUiState.Loading -> item { LoadingIndicator() }
 
@@ -88,18 +81,10 @@ fun MusicContent(
                 val data = uiState.data
 
                 if (data.hasPreference) {
-                    if (onSearchClick == null) {
-                        item(key = "preference_title") {
-                            Column {
-                                MusicSectionTitle("你的偏好")
-                                data.portrait?.let { MusicPortraitSummary(it) }
-                            }
-                        }
-                    } else {
-                        data.portrait?.let { portrait ->
-                            item(key = "preference_portrait") {
-                                MusicPortraitSummary(portrait)
-                            }
+                    item(key = "preference_title") {
+                        Column {
+                            MusicSectionTitle("你的偏好")
+                            data.portrait?.let { MusicPortraitSummary(it) }
                         }
                     }
                     items(data.preferences.chunked(columns), key = { row -> "pref_${row.first().id}" }) { row ->

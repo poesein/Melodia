@@ -85,7 +85,7 @@ fun ArtistCatalogSheet(
             Text("使用 MusicBrainz 音乐资料库的专辑分类，合并同一专辑的重制、地区等发行版本。单曲、EP、现场、精选和混音专辑不在此列表。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!state.enabled) {
-                Text("目前使用网易云原专辑列表和已有曲数设置。开启此开关仅为该歌手单独设置；全局开关在设置 → 扩展 → 歌手专辑中管理。",
+                Text("目前使用网易云原专辑列表。开启此开关仅为该歌手单独设置；全局开关在设置 → 歌手专辑筛选中管理。",
                     style = MaterialTheme.typography.bodyMedium)
             } else {
                 ArtistCatalogStatus(state, selection)

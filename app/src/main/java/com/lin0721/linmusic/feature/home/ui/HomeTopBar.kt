@@ -246,7 +246,7 @@ fun FilterPills(
 
 // 单个筛选药丸，选中态背景色/文字色带过渡动画
 @Composable
-internal fun FilterPillChip(
+private fun FilterPillChip(
     text: String,
     selected: Boolean,
     onClick: () -> Unit,

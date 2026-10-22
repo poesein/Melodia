@@ -33,7 +33,7 @@ class PersonalLibraryNavigationTest {
         assertEquals(Screen.PersonalLibrary, restored.currentScreen)
         restored.navigateTo(Screen.Library)
         assertEquals(Screen.Artist(1), restored.currentScreen)
-        assertEquals(restored.liveEntryIds.size, restored.toSnapshot().let { listOf(it.homeIds, it.musicIds, it.searchIds, it.libraryIds, it.personalLibraryIds, it.localMusicIds, it.downloadsIds, it.cloudIds, it.myProfileIds).flatten().size })
+        assertEquals(restored.liveEntryIds.size, restored.toSnapshot().let { listOf(it.homeIds, it.collectedAlbumsIds, it.searchIds, it.libraryIds, it.personalLibraryIds, it.localMusicIds, it.downloadsIds, it.cloudIds, it.myProfileIds).flatten().size })
     }
     @Test fun oldSnapshotGetsANewPersonalLibraryRootWithoutChangingItsActiveTab() = snapshot {
         val old = Json.decodeFromString<NavigationSnapshot>("{\"activeTabIndex\":2}")

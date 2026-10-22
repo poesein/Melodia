@@ -20,8 +20,6 @@ import com.lin0721.linmusic.core.ui.components.PlaylistCollectItem
 import com.lin0721.linmusic.core.network.AppString
 import com.lin0721.linmusic.core.network.ResourceProvider
 import com.lin0721.linmusic.core.network.toUserMessage
-import com.lin0721.linmusic.core.preferences.ArtistAlbumFilterSettings
-import com.lin0721.linmusic.core.preferences.SettingsPreferences
 import com.lin0721.linmusic.feature.artist.domain.ArtistAlbumSelection
 import com.lin0721.linmusic.feature.playlist.domain.TrackBatchActionsDelegate
 import com.lin0721.linmusic.feature.playlist.presentation.TrackSelection
@@ -32,7 +30,6 @@ import com.lin0721.linmusic.feature.search.domain.SearchType
 import com.lin0721.linmusic.feature.create.data.playlistPrivacyOf
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -56,35 +53,11 @@ class ArtistViewModel(
     private val userPreferences: UserPreferences,
     private val resourceProvider: ResourceProvider,
     private val searchRepository: SearchRepository,
-    private val trackBatchActions: TrackBatchActionsDelegate,
-    private val settingsPreferences: SettingsPreferences
+    private val trackBatchActions: TrackBatchActionsDelegate
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ArtistUiState>(ArtistUiState.Loading)
     val uiState: StateFlow<ArtistUiState> = _uiState.asStateFlow()
-    private val albumFilterArtistId = MutableStateFlow(0L)
-
-    val albumDefaultMinTracks = settingsPreferences.artistAlbumMinTracks.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS
-    )
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val albumOverrideFlow = albumFilterArtistId.flatMapLatest(settingsPreferences::artistAlbumMinTracksOverride)
-    val albumMinTracksOverride = albumOverrideFlow.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), null
-    )
-    val albumMinTracks = combine(settingsPreferences.artistAlbumMinTracks, albumOverrideFlow) { default, override ->
-        override ?: default
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS)
-
-    fun updateAlbumMinTracks(minimum: Int) {
-        val artistId = currentArtistId
-        if (artistId > 0) viewModelScope.launch { settingsPreferences.saveArtistAlbumMinTracksOverride(artistId, minimum) }
-    }
-
-    fun resetAlbumMinTracks() {
-        val artistId = currentArtistId
-        if (artistId > 0) viewModelScope.launch { settingsPreferences.clearArtistAlbumMinTracksOverride(artistId) }
-    }
 
     private val _toastEvent = MutableSharedFlow<String>()
     val toastEvent: SharedFlow<String> = _toastEvent.asSharedFlow()
@@ -147,7 +120,6 @@ class ArtistViewModel(
             _selection.value = TrackSelection()
         }
         currentArtistId = artistId
-        albumFilterArtistId.value = artistId
         albumOffset = 0
         allSongsOffset = 0
         _uiState.value = ArtistUiState.Loading

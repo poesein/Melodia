@@ -37,7 +37,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lin0721.linmusic.core.ui.theme.BackgroundDark
 import com.lin0721.linmusic.feature.home.ui.HomeScreen
 import com.lin0721.linmusic.feature.home.ui.HomeViewModel
-import com.lin0721.linmusic.feature.music.ui.MusicScreen
 import com.lin0721.linmusic.feature.profile.ui.FollowListMode
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -50,7 +49,6 @@ fun MelodiaNavHost(
     homeViewModel: HomeViewModel,
     homeTab: Int,
     showHomeMusicNewWorks: Boolean,
-    showMusicNewWorks: Boolean,
     searchAutoFocus: Boolean,
     searchReturnsToOrigin: Boolean,
     onOpenSidebar: () -> Unit,
@@ -63,7 +61,6 @@ fun MelodiaNavHost(
     onNavigateToFollowList: (Long, FollowListMode) -> Unit,
     onHomeTabSelected: (Int) -> Unit,
     onShowHomeMusicNewWorksChanged: (Boolean) -> Unit,
-    onShowMusicNewWorksChanged: (Boolean) -> Unit,
     onNavigateToSearch: () -> Unit,
     onNavigateToLocalMusic: () -> Unit,
     onNavigateToScreen: (Screen) -> Unit,
@@ -145,13 +142,10 @@ fun MelodiaNavHost(
                         onLoginScreenVisibilityChanged = onLoginScreenVisibilityChanged
                     )
                 }
-                is Screen.Music -> MusicScreen(
-                    showNewWorksFeed = showMusicNewWorks,
-                    onShowNewWorksFeedChanged = onShowMusicNewWorksChanged,
-                    onPlaylistClick = onNavigateToPlaylist,
-                    onStyleClick = { id, name -> onNavigateToScreen(Screen.Style(id, name)) },
-                    onSearchClick = onNavigateToSearch,
-                    onOpenRecognition = onOpenRecognition
+                is Screen.CollectedAlbums -> com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsScreen(
+                    onAlbumClick = { onNavigateToPlaylist(it, true) },
+                    isActive = entry.id == currentEntry.id,
+                    onLoginScreenVisibilityChanged = onLoginScreenVisibilityChanged
                 )
                 is Screen.Playlist -> {
                     com.lin0721.linmusic.feature.playlist.ui.PlaylistScreen(

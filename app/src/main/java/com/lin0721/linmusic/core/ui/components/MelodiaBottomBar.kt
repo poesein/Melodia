@@ -1,5 +1,7 @@
 package com.lin0721.linmusic.core.ui.components
 
+import androidx.compose.material.icons.filled.Album
+
 import android.media.AudioDeviceInfo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -544,7 +546,7 @@ fun MelodiaNavigationBar(
             val navItems = effectiveLayout.filter { it.visible }.map { setting ->
                 when (setting.item) {
                     BottomBarItem.HOME -> Triple("主页", Icons.Default.Home, Screen.Home)
-                    BottomBarItem.MUSIC -> Triple("音乐", Icons.Default.MusicNote, Screen.Music)
+                    BottomBarItem.ALBUMS -> Triple("专辑", Icons.Default.Album, Screen.CollectedAlbums)
                     BottomBarItem.PERSONAL_LIBRARY -> Triple("个人音乐库", Icons.Default.LibraryMusic, Screen.PersonalLibrary)
                     BottomBarItem.SEARCH -> Triple("搜索", Icons.Default.Search, Screen.Search)
                     BottomBarItem.LIBRARY -> Triple("音乐库", Icons.Default.LibraryMusic, Screen.Library)

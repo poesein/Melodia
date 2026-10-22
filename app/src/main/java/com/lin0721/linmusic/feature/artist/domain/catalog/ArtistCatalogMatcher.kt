@@ -1,7 +1,6 @@
 package com.lin0721.linmusic.feature.artist.domain.catalog
 
 import com.lin0721.linmusic.core.model.ArtistAlbum
-import com.lin0721.linmusic.core.preferences.ArtistAlbumFilterSettings
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -46,10 +45,8 @@ object ArtistCatalogMatcher {
         albums: List<ArtistAlbum>,
         groups: List<ArtistCatalogReleaseGroup>,
         normalizer: ArtistCatalogTitleNormalizer = ArtistCatalogTitleNormalizer(),
-        boundArtistMbid: String? = null,
-        minTracks: Int = ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS
+        boundArtistMbid: String? = null
     ): ArtistCatalogSelection {
-        val minimum = ArtistAlbumFilterSettings.normalizeMinTracks(minTracks)
         val catalog = groups.distinctBy { it.id }.filter { group ->
             boundArtistMbid == null || group.artistCredits.any { it.artistId == boundArtistMbid }
         }
@@ -97,10 +94,8 @@ object ArtistCatalogMatcher {
         val duplicates = mutableListOf<ArtistAlbum>()
         candidates.values.forEach { variants ->
             val ordered = variants.sortedWith(compareBy<ArtistCatalogAlbumMatch>(
-                // Select a qualifying edition before collapsing editions. Otherwise an
-                // undersized original hides a qualifying deluxe release when the caller
-                // applies the count filter. Keep all classifications for the status counts.
-                { if (minimum == 0 || it.album.size >= minimum) 0 else 1 },
+                // Prefer the original release when collapsing regional/remastered editions.
+                // Album size is only a final tie-breaker, never a visibility threshold.
                 { if (normalizer.isEditionTitle(it.album.name)) 1 else 0 },
                 { it.titleMatch.ordinal },
                 { releaseDateDistance(it.album.publishTime, it.group.firstReleaseDate) },

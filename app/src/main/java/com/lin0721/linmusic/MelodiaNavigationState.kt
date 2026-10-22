@@ -14,6 +14,7 @@ import com.lin0721.linmusic.feature.home.ui.TAB_ALL
 import com.lin0721.linmusic.feature.home.ui.TAB_MUSIC
 import com.lin0721.linmusic.feature.profile.ui.FollowListMode
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 
 // 导航目标：每一帧自带跳转参数（而非存在导航状态里的单一全局变量），
@@ -23,7 +24,9 @@ sealed class Screen {
     @Serializable
     data object Home : Screen()
     @Serializable
-    data object Music : Screen()
+    // Keep the previous personal route name readable across a same-signature upgrade.
+    @SerialName("com.lin0721.linmusic.Screen.Music")
+    data object CollectedAlbums : Screen()
     @Serializable
     data class Playlist(val id: Long, val isAlbum: Boolean) : Screen()
     @Serializable
@@ -117,9 +120,8 @@ class MelodiaNavigationState(
     initialDownloadsIds: List<Long> = emptyList(),
     initialCloudIds: List<Long> = emptyList(),
     initialMyProfileIds: List<Long> = emptyList(),
-    initialMusicStack: List<Screen> = listOf(Screen.Music),
-    initialMusicIds: List<Long> = emptyList(),
-    initialShowMusicNewWorks: Boolean = false,
+    initialCollectedAlbumsStack: List<Screen> = listOf(Screen.CollectedAlbums),
+    initialCollectedAlbumsIds: List<Long> = emptyList(),
     initialSearchReturnTab: Screen? = null,
     initialShowHomeMusicNewWorks: Boolean = false,
     initialPersonalLibraryStack: List<Screen> = listOf(Screen.PersonalLibrary),
@@ -150,13 +152,13 @@ class MelodiaNavigationState(
         .apply { addAll(buildEntries(initialCloudStack, initialCloudIds)) }
     private val myProfileStack = mutableStateListOf<NavEntry>()
         .apply { addAll(buildEntries(initialMyProfileStack, initialMyProfileIds)) }
-    private val musicStack = mutableStateListOf<NavEntry>()
-        .apply { addAll(buildEntries(initialMusicStack, initialMusicIds)) }
+    private val collectedAlbumsStack = mutableStateListOf<NavEntry>()
+        .apply { addAll(buildEntries(initialCollectedAlbumsStack, initialCollectedAlbumsIds)) }
     private val personalLibraryStack = mutableStateListOf<NavEntry>()
         .apply { addAll(buildEntries(initialPersonalLibraryStack, initialPersonalLibraryIds)) }
 
     private val allStacks: List<List<NavEntry>>
-        get() = listOf(homeStack, searchStack, libraryStack, localMusicStack, downloadsStack, cloudStack, myProfileStack, musicStack, personalLibraryStack)
+        get() = listOf(homeStack, searchStack, libraryStack, localMusicStack, downloadsStack, cloudStack, myProfileStack, collectedAlbumsStack, personalLibraryStack)
 
     init {
         // 恢复的 id 可能大于计数器，避免之后分配出重复 id
@@ -174,7 +176,7 @@ class MelodiaNavigationState(
         private set
 
     private fun isTopLevelTab(screen: Screen): Boolean = when (screen) {
-        Screen.Home, Screen.Music, Screen.Search, Screen.Library, Screen.PersonalLibrary,
+        Screen.Home, Screen.CollectedAlbums, Screen.Search, Screen.Library, Screen.PersonalLibrary,
         Screen.LocalMusic, Screen.Downloads, Screen.Cloud, Screen.MyProfile -> true
         else -> false
     }
@@ -186,7 +188,7 @@ class MelodiaNavigationState(
         Screen.Downloads -> downloadsStack
         Screen.Cloud -> cloudStack
         Screen.MyProfile -> myProfileStack
-        Screen.Music -> musicStack
+        Screen.CollectedAlbums -> collectedAlbumsStack
         Screen.PersonalLibrary -> personalLibraryStack
         else -> homeStack
     }
@@ -206,29 +208,25 @@ class MelodiaNavigationState(
     // 是否还有可回退的页面层级（包括二级页面、非首选根 tab、主页非「全部」分类或展开的最新药丸）
     val canGoBackToHomeAll: Boolean
         get() = canNavigateBack || canReturnFromSearch || activeTab != defaultRootTab ||
-            (activeTab == Screen.Home && (homeTab != TAB_ALL || showHomeMusicNewWorks)) ||
-            (activeTab == Screen.Music && showMusicNewWorks)
+            (activeTab == Screen.Home && (homeTab != TAB_ALL || showHomeMusicNewWorks))
 
     // 主页三个 tab 的选中项。存在导航状态里而非 HomeScreen 内部——
     // 页面切走时 HomeScreen 会离开 composition，记在里面的话从电台详情页退回来会跳回「全部」
     var homeTab by mutableStateOf(initialHomeTab)
         private set
 
-    // 主页保留官方音乐/最新；独立音乐入口持有自己的选择，两个根页互不改变对方现场。
+    // 主页保留官方音乐/最新，收藏专辑使用独立回退栈。
     var showHomeMusicNewWorks by mutableStateOf(initialShowHomeMusicNewWorks)
-        private set
-
-    var showMusicNewWorks by mutableStateOf(initialShowMusicNewWorks)
         private set
 
     var searchAutoFocus by mutableStateOf(false)
         private set
 
     // 页面内搜索是一次往返；底栏主动进入搜索时不继承返回目标。
-    // 原栈帧保持不变，主页/独立音乐页的滚动位置和分类能一起恢复。
+    // 原栈帧保持不变，主页/专辑页的滚动位置和分类能一起恢复。
     private var searchReturnTab by mutableStateOf(
         initialSearchReturnTab.takeIf {
-            initialActiveTab == Screen.Search && it in listOf(Screen.Home, Screen.Music, Screen.PersonalLibrary)
+            initialActiveTab == Screen.Search && it in listOf(Screen.Home, Screen.CollectedAlbums, Screen.PersonalLibrary)
         }
     )
 
@@ -299,10 +297,6 @@ class MelodiaNavigationState(
             }
             return false
         }
-        if (defaultRootTab == Screen.Music && showMusicNewWorks) {
-            showMusicNewWorks = false
-            return false
-        }
         if (defaultRootTab == Screen.Home) {
             if (showHomeMusicNewWorks) {
                 showHomeMusicNewWorks = false
@@ -340,10 +334,6 @@ class MelodiaNavigationState(
 
     fun updateShowHomeMusicNewWorks(show: Boolean) {
         showHomeMusicNewWorks = show
-    }
-
-    fun updateShowMusicNewWorks(show: Boolean) {
-        showMusicNewWorks = show
     }
 
     fun openRadio(id: Long) {
@@ -394,7 +384,7 @@ class MelodiaNavigationState(
     fun openSearch(autoFocus: Boolean) {
         val returnTab = when (activeTab) {
             Screen.Home -> Screen.Home
-            Screen.Music -> Screen.Music
+            Screen.CollectedAlbums -> Screen.CollectedAlbums
             Screen.PersonalLibrary -> Screen.PersonalLibrary
             Screen.Search -> searchReturnTab
             else -> null
@@ -444,9 +434,8 @@ class MelodiaNavigationState(
         cloudIds = cloudStack.map { it.id },
         myProfileIds = myProfileStack.map { it.id },
         activeTabScreen = activeTab,
-        musicStack = musicStack.map { it.screen },
-        musicIds = musicStack.map { it.id },
-        showMusicNewWorks = showMusicNewWorks,
+        collectedAlbumsStack = collectedAlbumsStack.map { it.screen },
+        collectedAlbumsIds = collectedAlbumsStack.map { it.id },
         searchReturnTab = searchReturnTab,
         showHomeMusicNewWorks = showHomeMusicNewWorks,
         personalLibraryStack = personalLibraryStack.map { it.screen },
@@ -475,9 +464,8 @@ internal data class NavigationSnapshot(
     val cloudIds: List<Long> = emptyList(),
     val myProfileIds: List<Long> = emptyList(),
     val activeTabScreen: Screen? = null,
-    val musicStack: List<Screen> = listOf(Screen.Music),
-    val musicIds: List<Long> = emptyList(),
-    val showMusicNewWorks: Boolean = false,
+    @SerialName("musicStack") val collectedAlbumsStack: List<Screen> = listOf(Screen.CollectedAlbums),
+    @SerialName("musicIds") val collectedAlbumsIds: List<Long> = emptyList(),
     val searchReturnTab: Screen? = null,
     val showHomeMusicNewWorks: Boolean = false,
     val personalLibraryStack: List<Screen> = listOf(Screen.PersonalLibrary),
@@ -491,7 +479,7 @@ private fun tabIndex(tab: Screen): Int = when (tab) {
     Screen.Downloads -> 4
     Screen.Cloud -> 5
     Screen.MyProfile -> 6
-    Screen.Music -> 7
+    Screen.CollectedAlbums -> 7
     Screen.PersonalLibrary -> 8
     else -> 0
 }
@@ -503,7 +491,7 @@ private fun tabFromIndex(index: Int): Screen = when (index) {
     4 -> Screen.Downloads
     5 -> Screen.Cloud
     6 -> Screen.MyProfile
-    7 -> Screen.Music
+    7 -> Screen.CollectedAlbums
     8 -> Screen.PersonalLibrary
     else -> Screen.Home
 }
@@ -529,9 +517,8 @@ internal fun restoreNavigationSnapshot(snapshot: NavigationSnapshot): MelodiaNav
         initialDownloadsIds = snapshot.downloadsIds,
         initialCloudIds = snapshot.cloudIds,
         initialMyProfileIds = snapshot.myProfileIds,
-        initialMusicStack = snapshot.musicStack.ifEmpty { listOf(Screen.Music) },
-        initialMusicIds = snapshot.musicIds,
-        initialShowMusicNewWorks = snapshot.showMusicNewWorks,
+        initialCollectedAlbumsStack = snapshot.collectedAlbumsStack.ifEmpty { listOf(Screen.CollectedAlbums) },
+        initialCollectedAlbumsIds = snapshot.collectedAlbumsIds,
         initialSearchReturnTab = snapshot.searchReturnTab,
         initialShowHomeMusicNewWorks = snapshot.showHomeMusicNewWorks,
         initialPersonalLibraryStack = snapshot.personalLibraryStack.ifEmpty { listOf(Screen.PersonalLibrary) },

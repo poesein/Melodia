@@ -62,9 +62,6 @@ fun ArtistScreen(
     val songSearch by viewModel.songSearch.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val importState by viewModel.importState.collectAsStateWithLifecycle()
-    val albumMinTracks by viewModel.albumMinTracks.collectAsStateWithLifecycle()
-    val albumDefaultMinTracks by viewModel.albumDefaultMinTracks.collectAsStateWithLifecycle()
-    val albumMinTracksOverride by viewModel.albumMinTracksOverride.collectAsStateWithLifecycle()
     val catalogState by catalogViewModel.state.collectAsStateWithLifecycle()
     val correctionsState by correctionsViewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(artistId) { correctionsViewModel.selectArtist(artistId) }
@@ -123,11 +120,6 @@ fun ArtistScreen(
                     albumsHasMore = state.albumsHasMore,
                     albumsLoadingMore = state.albumsLoadingMore,
                     albumsLoadError = state.albumsLoadError,
-                    albumMinTracks = albumMinTracks,
-                    albumDefaultMinTracks = albumDefaultMinTracks,
-                    albumHasCustomMinimum = albumMinTracksOverride != null,
-                    onAlbumMinTracksChanged = viewModel::updateAlbumMinTracks,
-                    onResetAlbumMinTracks = viewModel::resetAlbumMinTracks,
                     catalogState = activeCatalogState,
                     correctionsState = correctionsState.takeIf { it.artistId == state.artist.id }
                         ?: ArtistAlbumCorrectionsState(artistId = state.artist.id),

@@ -12,6 +12,9 @@ import com.lin0721.linmusic.feature.podcast.ui.PodcastSubscribedViewModel
 import com.lin0721.linmusic.feature.podcast.ui.PodcastToplistViewModel
 import com.lin0721.linmusic.feature.podcast.ui.RadioDetailViewModel
 import com.lin0721.linmusic.feature.library.ui.LibraryViewModel
+import com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsLayoutViewModel
+import com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsViewModel
+import com.lin0721.linmusic.feature.playlist.ui.PlaylistTrackSortViewModel
 import com.lin0721.linmusic.feature.library.textimport.PlaylistTextImportViewModel
 import com.lin0721.linmusic.feature.listendata.ui.ListenDataViewModel
 import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicViewModel
@@ -93,6 +96,13 @@ val viewModelModule = module {
     } onClose { it?.close() }
     viewModelOf(::LibraryPageLayoutViewModel)
     viewModelOf(::LibraryViewModel)
+    // Personal collection page and track ordering remain separate from the upstream library's state.
+    single { com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsPreferences(androidContext()) }
+    single { com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsRepository(get(), get()) }
+    viewModelOf(::CollectedAlbumsLayoutViewModel)
+    viewModelOf(::CollectedAlbumsViewModel)
+    single { com.lin0721.linmusic.feature.playlist.ui.PlaylistTrackSortRepository(androidContext()) } onClose { it?.close() }
+    viewModelOf(::PlaylistTrackSortViewModel)
     viewModelOf(::PlaylistTextImportViewModel)
     viewModelOf(::RecentPlayViewModel)
     viewModelOf(::CloudViewModel)

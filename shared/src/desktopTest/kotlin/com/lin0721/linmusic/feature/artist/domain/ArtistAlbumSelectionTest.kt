@@ -1,7 +1,6 @@
 package com.lin0721.linmusic.feature.artist.domain
 
 import com.lin0721.linmusic.core.model.ArtistAlbum
-import com.lin0721.linmusic.core.preferences.ArtistAlbumFilterSettings
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -15,32 +14,13 @@ class ArtistAlbumSelectionTest {
     )
 
     @Test
-    fun zeroIsTheDefaultAndDisplaysTheCompleteOriginalList() {
-        assertEquals(0, ArtistAlbumFilterSettings.DEFAULT_MIN_TRACKS)
-        assertSame(albums, ArtistAlbumSelection.visibleAlbums(albums, 0))
-    }
-
-    @Test
-    fun minimumIsInclusiveAndUnknownCountsDoNotPassAPositiveMinimum() {
-        assertEquals(listOf(3L, 4L), ArtistAlbumSelection.visibleAlbums(albums, 8).map { it.id })
-    }
-
-    @Test
-    fun returningToZeroRestoresSinglesAndUnknownCountsWithoutRefetching() {
-        ArtistAlbumSelection.visibleAlbums(albums, 8)
-        assertEquals(listOf(1L, 2L, 3L, 4L, 5L), ArtistAlbumSelection.visibleAlbums(albums, 0).map { it.id })
-    }
-
-    @Test
-    fun anEmptyFilteredPageContinuesUntilALaterPageContainsAlbums() {
+    fun noVisibleCatalogMatchesStillAllowsReadingLaterSourcePages() {
         val first = ArtistAlbumPage(List(20) { ArtistAlbum(id = (it + 10).toLong(), size = 1) }, true)
         val second = ArtistAlbumPage(listOf(ArtistAlbum(id = 30, size = 10)), false)
-        val firstVisible = ArtistAlbumSelection.visibleAlbums(first.albums, 8)
-        assertTrue(firstVisible.isEmpty())
-        assertTrue(ArtistAlbumSelection.shouldLoadMore(false, firstVisible.size, ArtistAlbumSelection.hasNextPage(first), false, null))
+        assertTrue(ArtistAlbumSelection.shouldLoadMore(false, 0, ArtistAlbumSelection.hasNextPage(first), false, null))
         val combined = first.albums + second.albums
-        assertEquals(listOf(30L), ArtistAlbumSelection.visibleAlbums(combined, 8).map { it.id })
-        assertEquals(21, combined.size) // Offset is based on original rows, never filtered rows.
+        assertEquals((10L..30L).toList(), combined.map { it.id })
+        assertEquals(21, combined.size) // Offset uses all source rows, including small/unknown albums.
         assertFalse(ArtistAlbumSelection.hasNextPage(second))
     }
 
@@ -139,7 +119,7 @@ class ArtistAlbumSelectionTest {
         var progress = ArtistAlbumPageProgress(emptyList(), 0, true)
         val offsets = mutableListOf<Int>()
         while (ArtistAlbumSelection.shouldLoadMore(false,
-                ArtistAlbumSelection.visibleAlbums(progress.albums, 8).size,
+                progress.albums.size,
                 progress.hasMore, false, progress.error, completeCatalog = true)) {
             offsets += progress.nextOffset
             val remaining = 164 - progress.nextOffset
@@ -154,8 +134,7 @@ class ArtistAlbumSelectionTest {
         assertEquals(listOf(0, 20, 40, 60, 80, 100, 120, 140, 160), offsets)
         assertEquals(164, progress.nextOffset)
         assertEquals(164, progress.albums.size)
-        assertEquals(listOf(21L, 161L, 162L, 163L, 164L),
-            ArtistAlbumSelection.visibleAlbums(progress.albums, 8).map { it.id })
+        assertEquals((1L..164L).toList(), progress.albums.map { it.id })
         assertNull(progress.error)
     }
 
@@ -198,10 +177,4 @@ class ArtistAlbumSelectionTest {
         assertFalse(terminal.hasMore)
     }
 
-    @Test
-    fun invalidSavedThresholdsAreBoundedAndNegativeThresholdsRestoreAll() {
-        assertEquals(0, ArtistAlbumFilterSettings.normalizeMinTracks(-5))
-        assertEquals(100, ArtistAlbumFilterSettings.normalizeMinTracks(999))
-        assertSame(albums, ArtistAlbumSelection.visibleAlbums(albums, -5))
-    }
 }

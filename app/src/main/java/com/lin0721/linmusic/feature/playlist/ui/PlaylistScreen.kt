@@ -91,7 +91,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.koin.androidx.compose.koinViewModel
-import androidx.compose.runtime.saveable.rememberSaveable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,7 +101,8 @@ fun PlaylistScreen(
     onBack: () -> Unit,
     onArtistClick: (Long) -> Unit,
     onAlbumClick: (Long) -> Unit,
-    onNavigateToProfile: (Long) -> Unit = {}
+    onNavigateToProfile: (Long) -> Unit = {},
+    sortViewModel: PlaylistTrackSortViewModel = koinViewModel(key = "playlist-track-sort:${if (isAlbum) "album" else "playlist"}:$playlistId")
 ) {
     val uiState      by viewModel.uiState.collectAsStateWithLifecycle()
     val totalDurationMs by viewModel.totalDurationMs.collectAsStateWithLifecycle()
@@ -194,9 +194,15 @@ fun PlaylistScreen(
     var showBatchDownloadSheet by remember { mutableStateOf(false) }
     var showBatchRemoveConfirm by remember { mutableStateOf(false) }
     var isReorderMode by remember { mutableStateOf(false) }
-    var trackSortOption by rememberSaveable(playlistId, isAlbum) { mutableStateOf(PlaylistSortOption.DEFAULT) }
-    var trackSortReversed by rememberSaveable(playlistId, isAlbum) { mutableStateOf(false) }
-    val trackSort = PlaylistTrackSort(trackSortOption, trackSortReversed)
+    val sortState by sortViewModel.state.collectAsStateWithLifecycle()
+    val sortTarget = PlaylistSortTarget(playlistId, isAlbum)
+    val activeSortScope = sortState.scope
+    val sortReady = sortState.loaded && activeSortScope != null && activeSortScope.target == sortTarget &&
+        activeSortScope.accountId == userProfile?.uid?.takeIf { it > 0 }
+    val trackSort = sortState.sort
+    // Don't create the paged list until its persisted direction is known. A brief default
+    // render would show the wrong order and may request pages before restoring reverse mode.
+    val visibleUiState = if (uiState is PlaylistUiState.Success && !sortReady) PlaylistUiState.Loading else uiState
     // A full load may finish after the user changes direction; read the latest selection then.
     val playbackSort by rememberUpdatedState(trackSort)
     var isSavingOrder by remember { mutableStateOf(false) }
@@ -240,6 +246,10 @@ fun PlaylistScreen(
     LaunchedEffect(viewModel) {
         viewModel.toastEvent.collect { com.lin0721.linmusic.core.ui.components.ToastManager.showToast(it) }
     }
+    LaunchedEffect(sortViewModel, playlistId, isAlbum) { sortViewModel.bind(sortTarget) }
+    LaunchedEffect(sortState.loaded, sortState.error) {
+        if (sortState.loaded) sortState.error?.let { com.lin0721.linmusic.core.ui.components.ToastManager.showToast(it) }
+    }
     LaunchedEffect(playlistId, isAlbum) {
         viewModel.loadPlaylistIfNeeded(playlistId, isAlbum)
         if (playlistId == -1L) {
@@ -248,10 +258,21 @@ fun PlaylistScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        when (val state = uiState) {
+        when (val state = visibleUiState) {
             is PlaylistUiState.Loading ->
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    val sortError = sortState.error?.takeUnless { sortState.loaded }
+                    if (sortError == null) CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    else Column(Modifier.padding(MelodiaSpacing.lg), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(sortError, color = MaterialTheme.colorScheme.onSurface)
+                        TextButton(onClick = sortViewModel::retry) { Text("重新读取排序") }
+                        activeSortScope?.let { scope ->
+                            TextButton(enabled = !sortState.saving, onClick = { sortViewModel.reset(scope) }) {
+                                Text(if (isAlbum) "重置此专辑排序" else "重置此歌单排序")
+                            }
+                        }
+                        TextButton(onClick = onBack) { Text("返回") }
+                    }
                 }
             is PlaylistUiState.Error ->
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -569,8 +590,7 @@ fun PlaylistScreen(
                         playlist       = state.playlist,
                         sortOrder = trackSort,
                         onSortOrderChange = { requested ->
-                            trackSortOption = requested.option
-                            trackSortReversed = requested.reversed
+                            activeSortScope?.let { sortViewModel.save(it, requested) }
                         },
                         onCompleteTrackOrder = { viewModel.ensureAllTracksLoaded {} },
                         totalDurationMs = totalDurationMs,

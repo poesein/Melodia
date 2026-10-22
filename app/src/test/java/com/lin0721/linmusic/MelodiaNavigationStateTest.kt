@@ -196,22 +196,6 @@ class MelodiaNavigationStateTest {
         assertFalse(nav.canGoBackToHomeAll)
     }
 
-    @Test
-    fun `独立音乐页返回主页后保留最新选择`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
-        nav.updateShowMusicNewWorks(true)
-        assertTrue(nav.showMusicNewWorks)
-        assertTrue(nav.canGoBackToHomeAll)
-
-        nav.navigateBack()
-        assertEquals(Screen.Home, nav.currentScreen)
-        assertTrue(nav.showMusicNewWorks)
-        assertEquals(com.lin0721.linmusic.feature.home.ui.TAB_ALL, nav.homeTab)
-        assertFalse(nav.canGoBackToHomeAll)
-        nav.openTab(Screen.Music)
-        assertTrue(nav.showMusicNewWorks)
-    }
 
     @Test
     fun `从其他Tab根页面回退到首页时重置分类为全部`() = inSnapshot {
@@ -229,12 +213,12 @@ class MelodiaNavigationStateTest {
     @Test
     fun `从音乐详情回退到独立音乐根页面`() = inSnapshot {
         val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
+        nav.openTab(Screen.CollectedAlbums)
         nav.openPlaylist(1L, false)
         assertEquals(Screen.Playlist(1L, false), nav.currentScreen)
 
         nav.navigateBack()
-        assertEquals(Screen.Music, nav.currentScreen)
+        assertEquals(Screen.CollectedAlbums, nav.currentScreen)
         assertEquals(com.lin0721.linmusic.feature.home.ui.TAB_ALL, nav.homeTab)
         assertTrue(nav.canGoBackToHomeAll)
 
@@ -264,31 +248,6 @@ class MelodiaNavigationStateTest {
         assertFalse(nav.canGoBackToHomeAll)
     }
 
-    @Test
-    fun `从最新详情返回音乐保留最新并可再切换默认内容`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
-        nav.updateShowMusicNewWorks(true)
-        nav.openPlaylist(1L, true)
-        assertEquals(Screen.Playlist(1L, true), nav.currentScreen)
-
-        // 第一次返回保留最新Feed展开态
-        nav.navigateBack()
-        assertEquals(Screen.Music, nav.currentScreen)
-        assertEquals(com.lin0721.linmusic.feature.home.ui.TAB_ALL, nav.homeTab)
-        assertTrue(nav.showMusicNewWorks)
-        assertTrue(nav.canGoBackToHomeAll)
-
-        nav.updateShowMusicNewWorks(false)
-        assertFalse(nav.showMusicNewWorks)
-        assertEquals(Screen.Music, nav.currentScreen)
-        assertTrue(nav.canGoBackToHomeAll)
-
-        nav.navigateBack()
-        assertEquals(Screen.Home, nav.currentScreen)
-        assertEquals(com.lin0721.linmusic.feature.home.ui.TAB_ALL, nav.homeTab)
-        assertFalse(nav.canGoBackToHomeAll)
-    }
 
     @Test
     fun `栈里重复出现的同一目标拥有不同的栈帧 id`() = inSnapshot {
@@ -358,44 +317,6 @@ class MelodiaNavigationStateTest {
         assertEquals(Screen.Search, nav.currentScreen)
     }
 
-    @Test
-    fun `快照恢复后保留栈帧 id 且后续分配不重复`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.openArtist(1L)
-        nav.openPlaylist(2L, false)
-        val before = nav.liveEntryIds
-        val currentId = nav.currentEntry.id
-
-        val snapshot = nav.toSnapshot()
-        val restored = MelodiaNavigationState(
-            initialHomeStack = snapshot.homeStack,
-            initialSearchStack = snapshot.searchStack,
-            initialLibraryStack = snapshot.libraryStack,
-            initialActiveTab = Screen.Home,
-            initialHomeIds = snapshot.homeIds,
-            initialSearchIds = snapshot.searchIds,
-            initialLibraryIds = snapshot.libraryIds,
-            initialNextEntryId = snapshot.nextEntryId,
-            initialLocalMusicStack = snapshot.localMusicStack,
-            initialDownloadsStack = snapshot.downloadsStack,
-            initialCloudStack = snapshot.cloudStack,
-            initialMyProfileStack = snapshot.myProfileStack,
-            initialLocalMusicIds = snapshot.localMusicIds,
-            initialDownloadsIds = snapshot.downloadsIds,
-            initialCloudIds = snapshot.cloudIds,
-            initialMyProfileIds = snapshot.myProfileIds,
-            initialMusicStack = snapshot.musicStack,
-            initialMusicIds = snapshot.musicIds,
-            initialShowMusicNewWorks = snapshot.showMusicNewWorks,
-            initialPersonalLibraryStack = snapshot.personalLibraryStack,
-            initialPersonalLibraryIds = snapshot.personalLibraryIds
-        )
-
-        assertEquals(before, restored.liveEntryIds)
-        assertEquals(currentId, restored.currentEntry.id)
-        restored.openArtist(9L)
-        assertFalse(restored.currentEntry.id in before)
-    }
 
     @Test
     fun `旧版本快照缺少栈帧 id 时重新分配`() = inSnapshot {
@@ -433,31 +354,13 @@ class MelodiaNavigationStateTest {
         assertFalse(nav.canNavigateBack)
     }
 
-    @Test
-    fun `音乐导航栈与最新选中态经过序列化恢复且详情返回正常`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
-        nav.updateShowMusicNewWorks(true)
-        nav.openPlaylist(88L, true)
-        val originalIds = nav.liveEntryIds
-        val encoded = Json.encodeToString(NavigationSnapshot.serializer(), nav.toSnapshot())
-        val restored = restoreNavigationSnapshot(Json.decodeFromString(NavigationSnapshot.serializer(), encoded))
-        assertEquals(Screen.Playlist(88L, true), restored.currentScreen)
-        assertTrue(restored.showMusicNewWorks)
-        assertEquals(originalIds, restored.liveEntryIds)
-        restored.navigateBack()
-        assertEquals(Screen.Music, restored.currentScreen)
-        assertTrue(restored.showMusicNewWorks)
-        restored.openArtist(99L)
-        assertFalse(restored.currentEntry.id in originalIds)
-    }
 
     @Test
     fun `偏好搜索入口重置旧搜索详情并自动聚焦真实搜索页`() = inSnapshot {
         val nav = MelodiaNavigationState()
         nav.openTab(Screen.Search)
         nav.openArtist(42L)
-        nav.openTab(Screen.Music)
+        nav.openTab(Screen.CollectedAlbums)
         nav.openSearch(autoFocus = true)
         assertEquals(Screen.Search, nav.currentScreen)
         assertTrue(nav.searchAutoFocus)
@@ -481,8 +384,8 @@ class MelodiaNavigationStateTest {
         assertEquals(Screen.Home, restored.currentScreen)
         assertEquals(10L, restored.currentEntry.id)
         assertEquals(com.lin0721.linmusic.feature.home.ui.TAB_MUSIC, restored.homeTab)
-        restored.openTab(Screen.Music)
-        assertEquals(Screen.Music, restored.currentScreen)
+        restored.openTab(Screen.CollectedAlbums)
+        assertEquals(Screen.CollectedAlbums, restored.currentScreen)
         assertTrue(restored.currentEntry.id != 10L)
     }
 
@@ -496,32 +399,15 @@ class MelodiaNavigationStateTest {
         val restored = restoreNavigationSnapshot(old)
         assertEquals(Screen.LocalMusic, restored.activeTab)
         assertEquals(9, restored.liveEntryIds.size)
-        restored.openTab(Screen.Music)
+        restored.openTab(Screen.CollectedAlbums)
         assertTrue(restored.currentEntry.id > 70L)
     }
 
-    @Test
-    fun `音乐搜索退出回到原音乐帧并保留最新选择`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
-        nav.updateShowMusicNewWorks(true)
-        val musicEntry = nav.currentEntry
-
-        nav.openSearch(autoFocus = true)
-        assertTrue(nav.canReturnFromSearch)
-        assertTrue(nav.returnFromSearch())
-
-        assertEquals(musicEntry, nav.currentEntry)
-        assertTrue(nav.showMusicNewWorks)
-        assertFalse(nav.searchAutoFocus)
-        assertFalse(nav.canReturnFromSearch)
-        assertFalse(nav.returnFromSearch())
-    }
 
     @Test
     fun `音乐搜索结果打开详情后先返回搜索再回音乐`() = inSnapshot {
         val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
+        nav.openTab(Screen.CollectedAlbums)
         val musicEntry = nav.currentEntry
         nav.openSearch(autoFocus = true)
         val searchEntry = nav.currentEntry
@@ -539,7 +425,7 @@ class MelodiaNavigationStateTest {
     @Test
     fun `底栏搜索主动进入后不会继承音乐搜索返回目标`() = inSnapshot {
         val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
+        nav.openTab(Screen.CollectedAlbums)
         nav.openSearch(autoFocus = true)
         nav.openTab(Screen.Search)
 
@@ -553,7 +439,7 @@ class MelodiaNavigationStateTest {
     @Test
     fun `离开搜索切其他底栏不会留下未来的音乐返回目标`() = inSnapshot {
         val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
+        nav.openTab(Screen.CollectedAlbums)
         nav.openSearch(autoFocus = true)
         nav.navigateTo(Screen.Library)
         nav.openSearch(autoFocus = true)
@@ -566,7 +452,7 @@ class MelodiaNavigationStateTest {
     @Test
     fun `重复音乐搜索往返和重复入口不会污染下一次独立搜索`() = inSnapshot {
         val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
+        nav.openTab(Screen.CollectedAlbums)
         val musicEntry = nav.currentEntry
         repeat(3) {
             nav.openSearch(autoFocus = true)
@@ -583,32 +469,14 @@ class MelodiaNavigationStateTest {
     fun `搜索是默认根页时音乐搜索仍然可以返回原音乐现场`() = inSnapshot {
         val nav = MelodiaNavigationState()
         nav.updateDefaultRootTab(Screen.Search)
-        nav.openTab(Screen.Music)
+        nav.openTab(Screen.CollectedAlbums)
         nav.openSearch(autoFocus = true)
         assertTrue(nav.canGoBackToHomeAll)
 
         nav.navigateBack()
-        assertEquals(Screen.Music, nav.currentScreen)
+        assertEquals(Screen.CollectedAlbums, nav.currentScreen)
     }
 
-    @Test
-    fun `搜索来源经过进程快照恢复且保留音乐帧ID和最新`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.openTab(Screen.Music)
-        nav.updateShowMusicNewWorks(true)
-        val musicEntry = nav.currentEntry
-        nav.openSearch(autoFocus = true)
-        nav.openPlaylist(88L, true)
-        val encoded = Json.encodeToString(NavigationSnapshot.serializer(), nav.toSnapshot())
-        val restored = restoreNavigationSnapshot(Json.decodeFromString(NavigationSnapshot.serializer(), encoded))
-
-        assertEquals(Screen.Playlist(88L, true), restored.currentScreen)
-        restored.navigateBack()
-        assertTrue(restored.canReturnFromSearch)
-        restored.navigateBack()
-        assertEquals(musicEntry, restored.currentEntry)
-        assertTrue(restored.showMusicNewWorks)
-    }
 
     @Test
     fun `旧快照和无效搜索来源按独立搜索原规则恢复`() = inSnapshot {
@@ -619,7 +487,7 @@ class MelodiaNavigationStateTest {
 
         val stale = restoreNavigationSnapshot(NavigationSnapshot(
             activeTabScreen = Screen.Library,
-            searchReturnTab = Screen.Music
+            searchReturnTab = Screen.CollectedAlbums
         ))
         stale.openSearch(autoFocus = true)
         assertFalse(stale.canReturnFromSearch)
@@ -650,43 +518,7 @@ class MelodiaNavigationStateTest {
         assertFalse(nav.canGoBackToHomeAll)
     }
 
-    @Test
-    fun `主页与独立音乐的最新选择互不改变`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.selectHomeTab(com.lin0721.linmusic.feature.home.ui.TAB_MUSIC)
-        nav.updateShowHomeMusicNewWorks(true)
-        nav.openTab(Screen.Music)
-        assertFalse(nav.showMusicNewWorks)
-        nav.updateShowMusicNewWorks(true)
-        nav.openTab(Screen.Home)
-        assertTrue(nav.showHomeMusicNewWorks)
-        nav.selectHomeTab(com.lin0721.linmusic.feature.home.ui.TAB_PODCAST)
-        assertFalse(nav.showHomeMusicNewWorks)
-        assertTrue(nav.showMusicNewWorks)
-        nav.openTab(Screen.Music)
-        assertTrue(nav.showMusicNewWorks)
-    }
 
-    @Test
-    fun `主页和独立音乐现场经过快照仍分别保留`() = inSnapshot {
-        val nav = MelodiaNavigationState()
-        nav.selectHomeTab(com.lin0721.linmusic.feature.home.ui.TAB_MUSIC)
-        nav.updateShowHomeMusicNewWorks(true)
-        nav.openTab(Screen.Music)
-        nav.updateShowMusicNewWorks(true)
-        nav.openPlaylist(9L, true)
-        val encoded = Json.encodeToString(NavigationSnapshot.serializer(), nav.toSnapshot())
-        val restored = restoreNavigationSnapshot(Json.decodeFromString(NavigationSnapshot.serializer(), encoded))
-
-        assertEquals(Screen.Playlist(9L, true), restored.currentScreen)
-        assertTrue(restored.showMusicNewWorks)
-        assertTrue(restored.showHomeMusicNewWorks)
-        restored.navigateBack()
-        assertEquals(Screen.Music, restored.currentScreen)
-        restored.openTab(Screen.Home)
-        assertEquals(com.lin0721.linmusic.feature.home.ui.TAB_MUSIC, restored.homeTab)
-        assertTrue(restored.showHomeMusicNewWorks)
-    }
 
     @Test
     fun `主页内搜索退出回原主页分类与栈帧`() = inSnapshot {

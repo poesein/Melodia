@@ -1,7 +1,6 @@
 package com.lin0721.linmusic.feature.artist.domain
 
 import com.lin0721.linmusic.core.model.ArtistAlbum
-import com.lin0721.linmusic.core.preferences.ArtistAlbumFilterSettings
 
 data class ArtistAlbumPageProgress(
     val albums: List<ArtistAlbum>,
@@ -10,14 +9,8 @@ data class ArtistAlbumPageProgress(
     val error: String? = null
 )
 
-/** Filtering never removes the source rows or changes the server pagination offset. */
+/** Catalogue visibility never removes source rows or changes the server pagination offset. */
 object ArtistAlbumSelection {
-    fun visibleAlbums(albums: List<ArtistAlbum>, minTracks: Int): List<ArtistAlbum> {
-        val minimum = ArtistAlbumFilterSettings.normalizeMinTracks(minTracks)
-        if (minimum == 0) return albums
-        return albums.filter { it.size >= minimum }
-    }
-
     fun shouldLoadMore(
         nearListEnd: Boolean,
         visibleCount: Int,
