@@ -1,0 +1,190 @@
+name: Personal beta.28 APK (one-time)
+
+# One-shot signed APK build. Trigger only when this workflow file changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/personal-beta28-once.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-beta28-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      INPUT_VERSION: 2.0.0-beta.28
+      INPUT_VERSION_CODE: 2000028
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验版本与完整签名材料
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+
+          signing_names = (
+              "RELEASE_KEYSTORE_BASE64", "RELEASE_STORE_PASSWORD",
+              "RELEASE_KEY_ALIAS", "RELEASE_KEY_PASSWORD",
+          )
+          missing = [name for name in signing_names if not os.environ.get(name, "").strip()]
+          if missing:
+              raise SystemExit("缺少正式签名 secrets：" + ", ".join(missing))
+
+          version = os.environ["INPUT_VERSION"]
+          match = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:-(beta|rc)\.([0-9]+))?", version)
+          if not match:
+              raise SystemExit("版本号需要 MAJOR.MINOR.PATCH[-beta.N|-rc.N]（不带 v）")
+          major, minor, patch = map(int, match.group(1, 2, 3))
+          kind, number = match.group(4, 5)
+          sub_code = 99
+          if kind:
+              number = int(number)
+              maximum = 49 if kind == "beta" else 48
+              if not 0 <= number <= maximum:
+                  raise SystemExit("预发布编号超出 VersionCodeResolver 支持范围")
+              sub_code = number if kind == "beta" else 50 + number
+          expected = (major * 10000 + minor * 100 + patch) * 100 + sub_code
+          raw_code = os.environ["INPUT_VERSION_CODE"]
+          if not re.fullmatch(r"[0-9]+", raw_code) or not 1 <= int(raw_code) <= 2100000000:
+              raise SystemExit("version_code 必须是有效的 Android 正整数版本号")
+          if int(raw_code) != expected:
+              raise SystemExit(f"version_code 应为 {expected}，需与应用内更新的版本解析一致")
+          print(f"个人构建版本：{version} / {expected}")
+          PY
+
+      - name: 配置 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 配置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: 写入个人签名 keystore
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          lines = os.environ["RELEASE_KEYSTORE_BASE64"].splitlines()
+          encoded = "".join(line.strip() for line in lines if not line.startswith("-----"))
+          try:
+              decoded = base64.b64decode(encoded, validate=True)
+          except ValueError:
+              raise SystemExit("RELEASE_KEYSTORE_BASE64 不是有效的 Base64 签名文件")
+          if not decoded:
+              raise SystemExit("签名文件为空")
+          keystore = Path(os.environ["RUNNER_TEMP"]) / "melodia-personal-release.jks"
+          keystore.write_bytes(decoded)
+          keystore.chmod(0o600)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
+              environment.write(f"RELEASE_STORE_FILE={keystore}\n")
+          PY
+
+      - name: 检查 keystore 与别名
+        shell: bash
+        run: |
+          keytool -list -keystore "$RELEASE_STORE_FILE" \
+            -alias "$RELEASE_KEY_ALIAS" -storepass:env RELEASE_STORE_PASSWORD > /dev/null
+
+      - name: 单元测试与个人 Release 构建
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:assembleRelease \
+            -PpersonalApplicationId=com.lin0721.linmusic.personal \
+            '-PpersonalAppLabel=Melodia Personal' \
+            -PpersonalUpdateOwner=poesein \
+            "-PreleaseVersionName=$INPUT_VERSION" \
+            "-PreleaseVersionCode=$INPUT_VERSION_CODE" \
+            --no-daemon
+
+      - name: 验证个人 APK 包名、版本与正式签名
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(app/build/outputs/apk/release/*.apk)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "预期只生成一个个人 Release APK" >&2
+            exit 1
+          fi
+          apk="${apks[0]}"
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          build_tools=$(find "$sdk/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$build_tools/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/personal-apk-signature.txt"
+          if grep -qi 'Android Debug' "$RUNNER_TEMP/personal-apk-signature.txt"; then
+            echo "检测到 Android Debug 签名，已拒绝上传个人 APK" >&2
+            exit 1
+          fi
+          keytool -exportcert -keystore "$RELEASE_STORE_FILE" \
+            -alias "$RELEASE_KEY_ALIAS" -storepass:env RELEASE_STORE_PASSWORD \
+            -file "$RUNNER_TEMP/personal-signing-certificate.der" > /dev/null
+          expected=$(openssl x509 -inform DER -in "$RUNNER_TEMP/personal-signing-certificate.der" \
+            -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          if [ "$expected" != "068c0ad458b50c506a4cc38c4799c3fd3a8fb18a16e713eecc7490493ba3de5a" ]; then
+            echo "个人签名与 beta.27 证书不一致，已拒绝上传" >&2
+            exit 1
+          fi
+          actual=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/personal-apk-signature.txt" | head -1 | tr '[:upper:]' '[:lower:]')
+          if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
+            echo "APK 签名证书与个人 keystore 不一致，已拒绝上传" >&2
+            exit 1
+          fi
+          "$build_tools/aapt2" dump badging "$apk" > "$RUNNER_TEMP/personal-apk-badging.txt"
+          export APK_BADGING_FILE="$RUNNER_TEMP/personal-apk-badging.txt"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          text = Path(os.environ["APK_BADGING_FILE"]).read_text(encoding="utf-8")
+          package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", text, re.M)
+          expected = ("com.lin0721.linmusic.personal", str(int(os.environ["INPUT_VERSION_CODE"])), os.environ["INPUT_VERSION"])
+          if not package or package.groups() != expected:
+              raise SystemExit("APK 包名或版本与个人构建配置不符，已拒绝上传")
+          print("APK 包名、版本与个人正式签名校验通过")
+          PY
+
+      - name: 清理签名材料
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/melodia-personal-release.jks" "$RUNNER_TEMP/personal-signing-certificate.der"
+
+      - name: 上传个人 APK 与混淆映射
+        uses: actions/upload-artifact@v4
+        with:
+          name: melodia-personal-2.0.0-beta.28
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 上传单元测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: melodia-personal-test-reports
+          path: app/build/reports/tests/
+          retention-days: 14
