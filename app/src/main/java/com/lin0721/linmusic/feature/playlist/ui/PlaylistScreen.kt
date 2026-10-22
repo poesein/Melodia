@@ -868,6 +868,9 @@ fun PlaylistScreen(
 
         if (showMoreMenuSheet && successState != null) {
             val playlist = successState.playlist
+            val isLikedSongsPlaylistView = userProfile?.let { profile ->
+                isLikedSongsPlaylist(playlist.name, playlist.id, profile.uid)
+            } == true
             val moreMenuSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
                 onDismissRequest = { showMoreMenuSheet = false },
