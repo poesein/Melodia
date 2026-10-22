@@ -7,6 +7,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CollectedAlbumsPresentationTest {
+    @Test fun releaseSortUsesPublicationDateAndKeepsUnknownDatesLastInBothDirections() {
+        val albums = listOf(AlbumSubItem(1, publishTime = 200), AlbumSubItem(2), AlbumSubItem(3, publishTime = 100))
+        assertEquals(listOf(1L, 3L, 2L), displayedAlbums(albums, "", AlbumPageLayout(sort = AlbumPageSort.RELEASE_NEWEST)).map { it.id })
+        assertEquals(listOf(3L, 1L, 2L), displayedAlbums(albums, "", AlbumPageLayout(sort = AlbumPageSort.RELEASE_OLDEST)).map { it.id })
+    }
     private val source = listOf(
         AlbumSubItem(1,"B",artists=listOf(Artist(1,"Muse")),subTime=20),
         AlbumSubItem(2,"A",artists=listOf(Artist(2,"U2")),subTime=30),

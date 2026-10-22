@@ -116,7 +116,7 @@ fun DisplaySettingsView(viewModel: SettingsViewModel, onNavigate: (SettingsSubMe
                         Text("$percent%", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp,
                             fontWeight = FontWeight.Bold)
                     }
-                    Text("整体放大界面，松手后生效", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Text("整体放大界面，松手后生效；调整时会重建当前界面", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     Spacer(Modifier.height(10.dp))
                     LyricCapsuleSlider(
                         value = percent,

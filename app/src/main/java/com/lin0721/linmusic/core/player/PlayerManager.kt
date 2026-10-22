@@ -392,7 +392,7 @@ class PlayerManager(
         _playWhenReady.value = false
         clearPendingTrack(restorePlayWhenReady = false)
         controllerHolder.stopAndClear()
-        Toast.makeText(context, "严格模式下未取得经过核验的音源，已暂停播放", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "严格模式未匹配到歌曲、歌手和专辑一致的音源，已暂停播放", Toast.LENGTH_SHORT).show()
     }
 
     override suspend fun initController() {
@@ -489,6 +489,16 @@ class PlayerManager(
         }
 
         playbackQueue.insertNext(items)
+        saveQueueState()
+    }
+
+    override fun appendToQueue(items: List<QueueItem>) {
+        if (items.isEmpty()) return
+        if (playbackQueue.isEmpty) {
+            playQueue(items, 0)
+            return
+        }
+        playbackQueue.append(items)
         saveQueueState()
     }
 

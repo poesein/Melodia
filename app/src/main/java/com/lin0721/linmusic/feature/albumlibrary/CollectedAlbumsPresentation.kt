@@ -24,6 +24,8 @@ internal fun displayedAlbums(albums: List<AlbumSubItem>, query: String, layout: 
     val sorted = when (layout.sort) {
         AlbumPageSort.NAME -> filtered.sortedWith { a, b -> collator.compare(a.name, b.name) }
         AlbumPageSort.RECENTLY_COLLECTED -> filtered.sortedByDescending { it.subTime }
+        AlbumPageSort.RELEASE_NEWEST -> filtered.sortedByDescending { it.publishTime.takeIf { time -> time > 0L } ?: Long.MIN_VALUE }
+        AlbumPageSort.RELEASE_OLDEST -> filtered.sortedBy { it.publishTime.takeIf { time -> time > 0L } ?: Long.MAX_VALUE }
     }
     // Group by the complete album credit, never duplicate a compilation for each track artist.
     return if (layout.groupByArtist) sorted.sortedWith { a, b -> collator.compare(a.artistLabel(), b.artistLabel()) } else sorted

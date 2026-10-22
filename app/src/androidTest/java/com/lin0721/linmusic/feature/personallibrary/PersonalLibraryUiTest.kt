@@ -91,8 +91,10 @@ class PersonalLibraryUiTest {
         } }
         compose.onNodeWithContentDescription("上移歌手").performClick()
         compose.onNodeWithContentDescription("显示专辑").performClick()
-        compose.onNodeWithText("5", useUnmergedTree = true).performScrollTo().performClick()
-        compose.onNodeWithText("封面").performScrollTo().performClick()
+        compose.onNodeWithText("列表列数").performScrollTo().performClick()
+        compose.onNodeWithText("5 列").performClick()
+        compose.onNodeWithText("歌单显示").performScrollTo().performClick()
+        compose.onNodeWithText("封面").performClick()
         compose.runOnIdle { assertEquals(5, layout.listColumns); assertEquals(3, layout.coverColumns) }
         compose.onNodeWithText("完成设置").performScrollTo().performClick()
         compose.onNodeWithText("专辑").assertDoesNotExist()

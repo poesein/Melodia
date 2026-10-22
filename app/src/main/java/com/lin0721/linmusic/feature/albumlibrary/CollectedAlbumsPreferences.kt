@@ -22,7 +22,10 @@ import kotlinx.coroutines.launch
 
 private val Context.collectedAlbumsLayout by preferencesDataStore(name = "collected_albums_layout")
 
-enum class AlbumPageSort { RECENTLY_COLLECTED, NAME }
+enum class AlbumPageSort(val label: String) {
+    RECENTLY_COLLECTED("最近收藏"), NAME("专辑名称"),
+    RELEASE_NEWEST("发布时间：从新到旧"), RELEASE_OLDEST("发布时间：从旧到新")
+}
 
 data class AlbumPageLayout(
     val columns: Int = 3,

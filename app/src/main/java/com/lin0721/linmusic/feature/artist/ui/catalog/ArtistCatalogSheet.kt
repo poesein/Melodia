@@ -54,7 +54,8 @@ fun ArtistCatalogSheet(
     onChangeBinding: () -> Unit,
     onRetry: () -> Unit,
     onRestoreAll: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onManualCorrections: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
@@ -84,6 +85,10 @@ fun ArtistCatalogSheet(
             }
             Text("使用 MusicBrainz 音乐资料库的专辑分类，合并同一专辑的重制、地区等发行版本。单曲、EP、现场、精选和混音专辑不在此列表。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            onManualCorrections?.let { open ->
+                com.lin0721.linmusic.feature.settings.ui.SettingsRow(
+                    "手动修正", "添加或隐藏专辑，保留已保存的修正记录", open)
+            }
             if (!state.enabled) {
                 Text("目前使用网易云原专辑列表。开启此开关仅为该歌手单独设置；全局开关在设置 → 歌手专辑筛选中管理。",
                     style = MaterialTheme.typography.bodyMedium)
@@ -91,7 +96,7 @@ fun ArtistCatalogSheet(
                 ArtistCatalogStatus(state, selection)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onRetry, enabled = !state.loading && !state.saving) { Text("重试资料库") }
-                    if (state.artistMbid != null) TextButton(onClick = onChangeBinding, enabled = !state.saving) { Text("更换资料库歌手") }
+                    if (state.artistMbid != null) TextButton(onClick = onChangeBinding, enabled = !state.saving) { Text("手动修正资料库歌手") }
                     TextButton(onClick = onRestoreAll, enabled = !state.saving) { Text("恢复全部专辑") }
                 }
                 if (state.choosingArtist || state.artistMbid == null) {

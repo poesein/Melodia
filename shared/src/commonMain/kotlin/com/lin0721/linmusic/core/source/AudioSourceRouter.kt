@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
+import java.security.MessageDigest
 
 private const val TAG = "AudioSourceRouter"
 
@@ -25,8 +26,7 @@ class AudioSourceRouter(
     private val sourcePreferences: SourcePreferences,
     private val settingsPreferences: SettingsPreferences,
     private val networkStateProvider: NetworkStateProvider,
-    private val providers: List<AudioSourceProvider> = emptyList(),
-    private val strictAudioVerifier: StrictAudioVerifier? = null
+    private val providers: List<AudioSourceProvider> = emptyList()
 ) : PlaybackRepository {
 
     override fun getSongPlaybackInfo(songId: Long): Flow<Result<SongPlaybackInfo>> = flow {
@@ -67,14 +67,10 @@ class AudioSourceRouter(
         AppLogger.i(TAG, "开始换源流程: songId=$songId (官方为试听: ${officialInfo?.isFreeTrial})")
 
         val communityPriority = sourcePreferences.communityPriority.first()
-        val officialPreview = officialInfo?.takeIf { officialTrusted && it.isFreeTrial && it.url.isNotBlank() }
 
         // 辅助函数：解析社区扩展源插件
         suspend fun tryResolveCommunity(): SongPlaybackInfo? {
             if (providers.isEmpty()) return null
-            // 没有可信参考片段/宿主核验器时不做徒劳的插件轮询，也不能退回“有 URL 就通过”。
-            if (strict && (strictAudioVerifier == null || officialPreview == null ||
-                    officialPreview.referenceStartMs == null || officialPreview.referenceStartMs < 0L)) return null
             val track = delegate.getSongDetail(songId).first().getOrNull() ?: return null
             val quality = if (networkStateProvider.isWifiConnected()) {
                 settingsPreferences.wifiQuality.first()
@@ -98,12 +94,11 @@ class AudioSourceRouter(
                         val resolvedId = r.resolvedSongId?.takeIf { it.isNotBlank() } ?: continue
                         if (candidate.platform != resolved || (candidate.hash?.takeIf { it.isNotBlank() } ?: candidate.id) != resolvedId) continue
                         if (!StrictSourceCandidatePolicy.matches(candidate, track.name, track.ar.map { it.name }, track.al.name, track.dt)) continue
-                        val evidence = strictAudioVerifier?.verify(track, r.url, officialPreview!!) ?: continue
-                        if (evidence.cacheIdentity.isBlank() || evidence.comparedDurationMs < StrictAudioVerification.MIN_COMPARED_DURATION_MS ||
-                            !evidence.normalizedCorrelation.isFinite() ||
-                            evidence.normalizedCorrelation !in StrictAudioVerification.MIN_NORMALIZED_CORRELATION..1.0) continue
+                        val identity = MessageDigest.getInstance("SHA-256").digest(
+                            "strict-metadata-v2|$songId|${resolved.key}|$resolvedId|${r.url}".toByteArray()
+                        ).joinToString("") { "%02x".format(it) }
                         return SongPlaybackInfo(url = r.url, sourceKind = PlaybackSourceKind.STRICT_VERIFIED,
-                            strictVerified = true, cacheIdentity = evidence.cacheIdentity)
+                            strictVerified = true, cacheIdentity = identity)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -116,7 +111,7 @@ class AudioSourceRouter(
 
         // 辅助函数：解析远程 UNM 兜底服务
         suspend fun tryResolveRemoteUnm(): SongPlaybackInfo? {
-            // UNM 的旧响应只有 URL/来源，不能提供候选身份或完成官方音频片段比对。
+            // Bare UNM URLs do not carry the required song/artist/album candidate metadata.
             if (strict) return null
             val remoteFallbackEnabled = sourcePreferences.unmRemoteFallbackEnabled.first()
             val serverUrl = sourcePreferences.unmServerUrl.first().trim()
@@ -148,7 +143,7 @@ class AudioSourceRouter(
                 AppLogger.i(TAG, "兜底返回官方试听链接: songId=$songId")
                 emitCurrent(Result.success(officialInfo.copy(trialFallback = officialInfo.isFreeTrial)))
             } else {
-                val message = if (strict) "严格模式未能核对同一录音，请尝试官方音源或已关联本地音频" else "换源未能获取到可用播放链接"
+                val message = if (strict) "严格模式未找到歌曲、歌手和专辑一致的可用音源" else "换源未能获取到可用播放链接"
                 emitCurrent(Result.failure(officialInfoResult.exceptionOrNull() ?: AppError.BizError(-1, message)))
             }
         }

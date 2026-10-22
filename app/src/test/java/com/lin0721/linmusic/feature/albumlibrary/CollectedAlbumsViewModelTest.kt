@@ -80,7 +80,7 @@ class CollectedAlbumsViewModelTest {
         } finally { f.store.clear(); Dispatchers.resetMain() }
     }
 
-    @Test fun failedPreparationLeavesTheCurrentQueueAndModeAlone() = runTest {
+    @Test fun unreadableAlbumDoesNotPreventPlayingTheOtherSelectedAlbum() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val f = Fixture()
         try {
@@ -89,10 +89,10 @@ class CollectedAlbumsViewModelTest {
             f.readDetail = { if (it == 2L) error("Cannot read album") else PlaylistDetail(it, tracks = listOf(Track(10))) }
             f.vm.play(listOf(AlbumSubItem(1), AlbumSubItem(2)), false)
             advanceUntilIdle()
-            assertTrue(f.queues.isEmpty())
-            assertEquals(PlayMode.SHUFFLE, f.mode.value)
+            assertEquals(listOf(10L), f.queues.single().map { it.songId })
+            assertEquals(PlayMode.LIST_LOOP, f.mode.value)
             assertFalse(f.vm.state.value.preparing)
-            assertEquals(0, f.initializations)
+            assertEquals(1, f.initializations)
         } finally { f.store.clear(); Dispatchers.resetMain() }
     }
 

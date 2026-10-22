@@ -153,7 +153,8 @@ data class AlbumInfo(
     val picUrl: String = "",
     val description: String? = null,
     // 专辑署名歌手（可能多位），比取首曲 ar 更准确
-    val artists: List<Artist> = emptyList()
+    val artists: List<Artist> = emptyList(),
+    val publishTime: Long = 0
 )
 
 // ======================= 歌单管理 DTO =======================

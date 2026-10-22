@@ -915,6 +915,9 @@ fun PlaylistScreen(
         }
         if (showMoreMenuSheet && successState != null) {
             val playlist = successState.playlist
+            val isLikedSongsPlaylistView = userProfile?.let { profile ->
+                isLikedSongsPlaylist(playlist.name, playlist.id, profile.uid)
+            } == true
             val moreMenuSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
                 onDismissRequest = { showMoreMenuSheet = false },
@@ -999,6 +1002,13 @@ fun PlaylistScreen(
                         playlist.id != userProfile?.uid
 
                     val menuItems = buildList {
+                        if (isLikedSongsPlaylistView) add(PlaylistMenuItem(
+                            icon = Icons.Default.Edit,
+                            title = "编辑喜欢的歌曲"
+                        ) {
+                            showMoreMenuSheet = false
+                            viewModel.enterSelection()
+                        })
                         if (isAlbum) add(PlaylistMenuItem(
                             icon = Icons.Default.LibraryAdd,
                             title = "显示在歌手专辑页"
@@ -1016,7 +1026,7 @@ fun PlaylistScreen(
                                     playlist.tracks.firstOrNull()?.ar.orEmpty()
                                 }), playlist.tracks)
                         })
-                        add(
+                        if (!isLikedSongsPlaylistView) add(
                             PlaylistMenuItem(
                                 icon = if (successState.isSubscribed) Icons.Rounded.CheckCircle else Icons.Rounded.AddCircleOutline,
                                 title = if (successState.isSubscribed) "取消收藏$resourceLabel" else "收藏$resourceLabel"

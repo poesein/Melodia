@@ -21,7 +21,7 @@ class StrictSourceCandidatePolicyTest {
         candidates, "龙拳", listOf("周杰伦"), "八度空间", 274_000
     )
 
-    @Test fun `完整精确候选可进入实际音频核验阶段`() { assertTrue(match(track())) }
+    @Test fun `完整精确候选可通过严格元数据匹配`() { assertTrue(match(track())) }
     @Test fun `只做标点宽度空白规范化不接受包含歌名`() {
         assertTrue(match(track(name = " Ａ－Ｂ "), name = "a-b"))
         assertFalse(match(track(name = "龙拳串烧")))
@@ -38,9 +38,9 @@ class StrictSourceCandidatePolicyTest {
         assertFalse(match(track(artists = listOf("周杰伦音乐馆"))))
         assertTrue(match(track(artists = listOf("乙", "甲")), artists = listOf("甲", "乙")))
     }
-    @Test fun `缺时长不把零或未知当作接近`() {
-        assertFalse(match(track(duration = 0)))
-        assertFalse(match(track(), duration = 0))
+    @Test fun `时长缺失时仍检查必需的三项身份信息`() {
+        assertTrue(match(track(duration = 0)))
+        assertTrue(match(track(), duration = 0))
     }
     @Test fun `时长容差最多百分之一并封顶三秒`() {
         assertTrue(match(track(duration = 272_000)))
@@ -51,20 +51,20 @@ class StrictSourceCandidatePolicyTest {
     @Test fun `明示现场与录音室版不能互相替换`() {
         assertFalse(match(track(name = "龙拳 (Live)")))
         assertFalse(match(track(album = "周杰伦演唱会")))
-        assertTrue(match(track(name = "龙拳（Live）", album = "Live"), name = "龙拳 (live)", album = "演唱会"))
+        assertTrue(match(track(name = "龙拳（Live）", album = "Live"), name = "龙拳 (live)", album = "Live"))
     }
     @Test fun `专辑标题中的伴奏重录混音等冲突不能被忽略`() {
         listOf("Instrumental", "Remix", "Acoustic", "Demo", "Cover", "重录版", "Remastered", "粤语版").forEach {
             assertFalse(it, match(track(album = it)))
         }
     }
-    @Test fun `中性精选集或专辑名差异本身不替代音频核验也不误作版本冲突`() {
-        assertTrue(match(track(album = "精选集")))
-        assertTrue(match(track(album = "")))
-        assertTrue(match(track(), album = null))
+    @Test fun `不同专辑或缺失专辑不能通过`() {
+        assertFalse(match(track(album = "精选集")))
+        assertFalse(match(track(album = "")))
+        assertFalse(match(track(), album = null))
     }
-    @Test fun `同名同歌手同专辑的不同标识仍按歧义拒绝`() {
-        assertNull(pick(listOf(track("q1"), track("q2"))))
+    @Test fun `同名同歌手同专辑的重复发行标识不制造歧义`() {
+        assertEquals("q1", pick(listOf(track("q1"), track("q2")))?.id)
     }
     @Test fun `重复同标识搜索行不制造歧义`() {
         assertEquals("q1", pick(listOf(track("q1"), track("q1")))?.id)
@@ -76,4 +76,14 @@ class StrictSourceCandidatePolicyTest {
     @Test fun `结构化乐队名称保留斜杠不被误拆`() {
         assertTrue(match(track(artists = listOf("AC/DC")), artists = listOf("AC/DC")))
     }
+    @Test fun `允许同专辑重制豪华周年版但拒绝现场与其他标题`() {
+        listOf("八度空间 (2014 Remaster)", "八度空间 (Deluxe Edition)", "八度空间 [20th Anniversary Edition]", "八度空间（重制版）").forEach {
+            assertTrue(it, match(track(album = it)))
+        }
+        assertTrue(match(track(name = "龙拳 - 2014 Remaster")))
+        assertFalse(match(track(album = "八度空间 (Live Remastered)")))
+        assertFalse(match(track(name = "龙拳 (Part II)")))
+        assertFalse(match(track(album = "其他专辑 (Deluxe Edition)")))
+    }
+
 }

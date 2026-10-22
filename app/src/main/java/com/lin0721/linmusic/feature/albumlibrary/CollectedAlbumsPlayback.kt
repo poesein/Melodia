@@ -8,6 +8,8 @@ import com.lin0721.linmusic.core.player.QueueItem
 import com.lin0721.linmusic.feature.library.data.AlbumSubItem
 import com.lin0721.linmusic.feature.playlist.data.PlaylistRepository
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -33,7 +35,8 @@ internal object CollectedAlbumsPlayback {
         shuffleAlbums: Boolean,
         loadAlbum: suspend (AlbumSubItem) -> List<Track>,
         random: Random = Random.Default,
-        onPrepared: (completed: Int, total: Int) -> Unit = { _, _ -> }
+        onPrepared: (completed: Int, total: Int) -> Unit = { _, _ -> },
+        onSkipped: ((AlbumSubItem) -> Unit)? = null
     ): List<QueueItem> = coroutineScope {
         val ordered = orderedAlbums(albums, shuffleAlbums, random)
         require(ordered.isNotEmpty()) { "当前没有可播放的专辑" }
@@ -43,6 +46,7 @@ internal object CollectedAlbumsPlayback {
         // awaitAll preserves input order even when a later album finishes first.
         ordered.map { album -> async {
             requests.withPermit {
+                try {
                 val tracks = withTimeout(30_000) { loadAlbum(album) }
                 currentCoroutineContext().ensureActive()
                 check(tracks.isNotEmpty()) { "《${album.name}》没有可播放曲目，请打开专辑检查后重试" }
@@ -52,10 +56,22 @@ internal object CollectedAlbumsPlayback {
                         artist = track.ar.joinToString(" / ") { it.name }.ifBlank { album.artists.joinToString(" / ") { it.name } },
                         coverUrl = track.al.picUrl.ifBlank { album.picUrl })
                 }
-                progress.withLock { onPrepared(++completed, ordered.size) }
                 queue
+                } catch (timeout: TimeoutCancellationException) {
+                    currentCoroutineContext().ensureActive()
+                    if (onSkipped == null) throw timeout
+                    progress.withLock { onSkipped(album) }
+                    emptyList()
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    if (onSkipped == null) throw error
+                    progress.withLock { onSkipped(album) }
+                    emptyList()
+                } finally {
+                    progress.withLock { onPrepared(++completed, ordered.size) }
+                }
             }
-        } }.awaitAll().flatten() // Repeated song IDs in different album editions are intentional.
+        } }.awaitAll().flatten().also { check(it.isNotEmpty()) { "所选专辑均未能读取，请打开专辑检查或刷新收藏后重试" } }
     }
 
     suspend fun loadTracks(album: AlbumSubItem, repository: PlaylistRepository): List<Track> {

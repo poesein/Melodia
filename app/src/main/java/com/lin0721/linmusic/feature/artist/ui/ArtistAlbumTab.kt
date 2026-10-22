@@ -17,6 +17,10 @@ import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 import com.lin0721.linmusic.feature.artist.domain.catalog.ArtistCatalogSelection
 import com.lin0721.linmusic.feature.artist.ui.catalog.ArtistCatalogUiState
 
+enum class ArtistAlbumSortOrder(val label: String) {
+    DEFAULT("默认顺序"), NEWEST("发布时间：从新到旧"), OLDEST("发布时间：从旧到新")
+}
+
 // 专辑 Tab: 采用精致的行模式展示，滚动到底自动追加下一页
 fun LazyListScope.artistAlbumTab(
     albums: List<ArtistAlbum>,
@@ -26,8 +30,23 @@ fun LazyListScope.artistAlbumTab(
     loadingMore: Boolean,
     loadError: String?,
     onRetry: () -> Unit,
-    onAlbumClick: (Long) -> Unit
+    onAlbumClick: (Long) -> Unit,
+    sortOrder: ArtistAlbumSortOrder = ArtistAlbumSortOrder.DEFAULT,
+    onSortOrderChanged: ((ArtistAlbumSortOrder) -> Unit)? = null
 ) {
+    if (onSortOrderChanged != null) item(key = "artist_album_sort") {
+        androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }.let { expanded ->
+            Box(Modifier.fillMaxWidth().padding(horizontal = MelodiaSpacing.md)) {
+                TextButton(onClick = { expanded.value = true }) { Text(sortOrder.label) }
+                androidx.compose.material3.DropdownMenu(expanded.value, { expanded.value = false }) {
+                    ArtistAlbumSortOrder.entries.forEach { order ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(order.label) },
+                            onClick = { expanded.value = false; onSortOrderChanged(order) })
+                    }
+                }
+            }
+        }
+    }
     // Keep browsing compact; diagnostics and all controls live in the artist menu.
     if (catalogState.enabled && catalogSelection != null) {
         item(key = "artist_catalog_summary") {
@@ -39,7 +58,12 @@ fun LazyListScope.artistAlbumTab(
             )
         }
     }
-    items(albums, key = { it.id }) { album ->
+    val ordered = when (sortOrder) {
+        ArtistAlbumSortOrder.DEFAULT -> albums
+        ArtistAlbumSortOrder.NEWEST -> albums.sortedByDescending { it.publishTime.takeIf { time -> time > 0L } ?: Long.MIN_VALUE }
+        ArtistAlbumSortOrder.OLDEST -> albums.sortedBy { it.publishTime.takeIf { time -> time > 0L } ?: Long.MAX_VALUE }
+    }
+    items(ordered, key = { it.id }) { album ->
         ArtistAlbumRow(album = album, onClick = { onAlbumClick(album.id) })
     }
     if (albums.isEmpty() && !loadingMore && !hasMore && loadError == null) {

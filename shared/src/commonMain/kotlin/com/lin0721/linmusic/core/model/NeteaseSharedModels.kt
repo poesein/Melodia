@@ -81,7 +81,8 @@ data class PlaylistDetail(
     // 仅专辑详情填充：专辑署名歌手
     val artists: List<Artist> = emptyList(),
     // 歌单可见性：0 公开，10 隐私；专辑无此字段
-    val privacy: Int = 0
+    val privacy: Int = 0,
+    val publishTime: Long = 0
 )
 
 @Serializable

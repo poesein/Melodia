@@ -297,7 +297,7 @@ fun PlaylistHeaderItem(
                                 }
                             }
                             // "更多"固定放最右侧
-                            if (!isLikedSongsPlaylistView) {
+                            run {
                                 MelodiaIconButton(onClick = onMoreClick) {
                                     Icon(
                                         imageVector = Icons.Default.MoreVert,

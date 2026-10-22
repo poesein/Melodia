@@ -125,14 +125,6 @@ fun ArtistMoreMenuSheet(
                 }
             }
 
-            TextButton(onClick = { onDismiss(); onManualCorrections() }, modifier = Modifier.fillMaxWidth()) {
-                Text("手动修正")
-            }
-            TextButton(onClick = { onDismiss(); onRestoreAll() }, enabled = catalogEnabled && !catalogSaving,
-                modifier = Modifier.fillMaxWidth()) {
-                Text("恢复全部")
-            }
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

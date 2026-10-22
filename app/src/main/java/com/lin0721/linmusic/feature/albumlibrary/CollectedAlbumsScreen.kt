@@ -47,6 +47,9 @@ fun CollectedAlbumsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val preferences by layoutModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(preferences.layout.sort, state.loading, state.albums) {
+        if (preferences.layout.sort in setOf(AlbumPageSort.RELEASE_NEWEST, AlbumPageSort.RELEASE_OLDEST)) viewModel.ensureReleaseDates()
+    }
     var login by remember { mutableStateOf(false) }
     var webLogin by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -103,7 +106,7 @@ internal fun CollectedAlbumsPage(
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     val shown = remember(state.albums, query, layout) { displayedAlbums(state.albums, query, layout) }
-    val canPlay = state.loggedIn && layoutReady && !state.loading && !state.preparing && shown.isNotEmpty()
+    val canPlay = state.loggedIn && layoutReady && !state.loading && !state.loadingReleaseDates && !state.preparing && shown.isNotEmpty()
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -112,6 +115,7 @@ internal fun CollectedAlbumsPage(
                 MelodiaIconButton(onClick = { onPlay(shown, true) }, enabled = canPlay) { Icon(Icons.Rounded.Shuffle, "随机播放专辑（专辑内顺序）") }
                 MelodiaIconButton(onClick = { searching = !searching; if (!searching) query = "" }) { Icon(Icons.Rounded.Search, "搜索收藏专辑") }
             }
+            if (state.loadingReleaseDates) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (searching) OutlinedTextField(query, { query = it }, singleLine = true,
                 placeholder = { Text("搜索专辑或歌手") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 trailingIcon = { MelodiaIconButton(onClick = { query = ""; searching = false }) { Icon(Icons.Rounded.Close, "关闭专辑搜索") } })

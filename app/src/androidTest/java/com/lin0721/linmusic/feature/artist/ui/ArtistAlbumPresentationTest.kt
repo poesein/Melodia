@@ -47,7 +47,7 @@ class ArtistAlbumPresentationTest {
     }
 
     @Test
-    fun allThreeCatalogActionsAreInTheArtistMenuAndCloseItBeforeTheAction() {
+    fun artistMenuKeepsOnlyCatalogSettingsAndClosesBeforeOpeningThem() {
         val calls = mutableListOf<String>()
         compose.setContent {
             MaterialTheme {
@@ -60,10 +60,10 @@ class ArtistAlbumPresentationTest {
         }
         compose.onNodeWithText("专辑最少曲数").assertDoesNotExist()
         compose.onNodeWithText("资料库设置").performClick()
-        compose.onNodeWithText("手动修正").performClick()
-        compose.onNodeWithText("恢复全部").performClick()
+        compose.onNodeWithText("手动修正").assertDoesNotExist()
+        compose.onNodeWithText("恢复全部").assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(listOf("dismiss", "settings", "dismiss", "corrections", "dismiss", "restore"), calls)
+            assertEquals(listOf("dismiss", "settings"), calls)
         }
     }
 }

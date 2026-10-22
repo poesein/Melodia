@@ -58,7 +58,7 @@ class LxAudioSourceProviderTest {
     }
 
     private fun track(platform: MusicPlatform, id: String, name: String = "七里香", artist: String = "周杰伦", durationMs: Long = 299_000) =
-        ExternalTrack(id = id, name = name, artists = artist, durationMs = durationMs, platform = platform, hash = if (platform == MusicPlatform.KUGOU) id else null)
+        ExternalTrack(id = id, name = name, artists = artist, albumName = "七里香", durationMs = durationMs, platform = platform, hash = if (platform == MusicPlatform.KUGOU) id else null)
 
     private suspend fun resolve(
         provider: LxAudioSourceProvider,
@@ -186,12 +186,12 @@ class LxAudioSourceProviderTest {
         assertTrue(!kw.contains("\"hash\""))
     }
 
-    @Test fun `严格候选存在歧义时不调用插件猜测`() = runBlocking {
+    @Test fun `相同歌曲歌手专辑的多个发行标识选择匹配候选`() = runBlocking {
         prefs.saveStrictFallbackEnabled(true)
         val runtime = RecordingRuntime(listOf("kw"), mapOf(("kw" to "KW1") to "https://kw.invalid/1"))
         val kuwo = FakeSearch(MusicPlatform.KUWO, listOf(track(MusicPlatform.KUWO, "KW1"), track(MusicPlatform.KUWO, "KW2")))
-        assertNull(resolve(LxAudioSourceProvider(runtime, prefs, listOf(kuwo)), "100"))
-        assertTrue(runtime.calls.isEmpty())
+        assertNotNull(resolve(LxAudioSourceProvider(runtime, prefs, listOf(kuwo)), "100"))
+        assertEquals(listOf("kw" to "KW1"), runtime.calls)
     }
 
     @Test fun `严格同平台标识保留真实来源与候选不冒充音频核验`() = runBlocking {
@@ -205,11 +205,11 @@ class LxAudioSourceProviderTest {
         assertEquals("p1", result?.pluginId)
     }
 
-    @Test fun `严格模式拒绝缺时长搜索候选`() = runBlocking {
+    @Test fun `歌曲歌手专辑完整时允许缺时长搜索候选`() = runBlocking {
         prefs.saveStrictFallbackEnabled(true)
         val runtime = RecordingRuntime(listOf("kw"), mapOf(("kw" to "KW1") to "https://kw.invalid/1"))
         val kuwo = FakeSearch(MusicPlatform.KUWO, listOf(track(MusicPlatform.KUWO, "KW1", durationMs = 0)))
-        assertNull(resolve(LxAudioSourceProvider(runtime, prefs, listOf(kuwo)), "100"))
-        assertTrue(runtime.calls.isEmpty())
+        assertNotNull(resolve(LxAudioSourceProvider(runtime, prefs, listOf(kuwo)), "100"))
+        assertEquals(listOf("kw" to "KW1"), runtime.calls)
     }
 }

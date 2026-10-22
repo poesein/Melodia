@@ -19,6 +19,8 @@ data class SongPlaybackInfo(
     val trialFallback: Boolean = false,
     // 未显式标注的旧缓存/调用方不能因默认值被当作可信官方结果。
     val sourceKind: PlaybackSourceKind = PlaybackSourceKind.UNKNOWN,
+    // Strict metadata identity has passed (song, artists, album, optional duration/version).
+    // This flag does not claim acoustic verification of the remote audio.
     val strictVerified: Boolean = false,
     val cacheIdentity: String? = null,
     // 网易云 freeTrialInfo.start 的秒数换算为毫秒；缺失/非法时不猜起点。

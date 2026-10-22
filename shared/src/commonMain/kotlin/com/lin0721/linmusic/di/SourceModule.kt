@@ -7,7 +7,6 @@ import com.lin0721.linmusic.core.source.AudioSourceRouter
 import com.lin0721.linmusic.core.source.LxPluginManager
 import com.lin0721.linmusic.core.source.PlatformSearchProvider
 import com.lin0721.linmusic.core.source.UnmApiClient
-import com.lin0721.linmusic.core.source.StrictAudioVerifier
 import com.lin0721.linmusic.core.source.provider.KugouSearchProvider
 import com.lin0721.linmusic.core.source.provider.KuwoSearchProvider
 import com.lin0721.linmusic.core.source.provider.QQSearchProvider
@@ -35,8 +34,7 @@ val sourceModule = module {
             sourcePreferences = get(),
             settingsPreferences = get(),
             networkStateProvider = get(),
-            providers = getAll<AudioSourceProvider>(),
-            strictAudioVerifier = getOrNull<StrictAudioVerifier>()
+            providers = getAll<AudioSourceProvider>()
         )
     }
 }

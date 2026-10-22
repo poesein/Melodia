@@ -29,7 +29,7 @@ fun CollectedAlbumsSettingsView(viewModel: CollectedAlbumsLayoutViewModel = koin
                 SettingsSwitchRow("按歌手分组", "同一张合辑保持完整", state.layout.groupByArtist) { enabled ->
                     viewModel.save { it.copy(groupByArtist = enabled) }
                 }
-                SettingsRow("专辑排序", if (state.layout.sort == AlbumPageSort.NAME) "专辑名称" else "最近收藏", { choosingSort = true })
+                SettingsRow("专辑排序", state.layout.sort.label, { choosingSort = true })
             } }
         } else if (state.error == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
     }
@@ -42,7 +42,7 @@ fun CollectedAlbumsSettingsView(viewModel: CollectedAlbumsLayoutViewModel = koin
     if (choosingSort) AlertDialog(onDismissRequest = { choosingSort = false }, title = { Text("专辑排序") },
         text = { Column { AlbumPageSort.entries.forEach { sort ->
             TextButton(onClick = { viewModel.save { it.copy(sort = sort) }; choosingSort = false }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (sort == AlbumPageSort.NAME) "专辑名称" else "最近收藏")
+                Text(sort.label)
             }
         } } }, confirmButton = {})
 }

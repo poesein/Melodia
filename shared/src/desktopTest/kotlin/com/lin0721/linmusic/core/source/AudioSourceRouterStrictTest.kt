@@ -61,146 +61,75 @@ class AudioSourceRouterStrictTest {
         override suspend fun search(keyword: String, offset: Int, limit: Int) = emptyList<ExternalTrack>()
     }
 
-    private class Verifier(private val accepted: Boolean = true, private val onVerify: suspend () -> Unit = {}) : StrictAudioVerifier {
-        var calls = 0
-        var referenceStart: Long? = null
-        override suspend fun verify(targetTrack: Track, candidateUrl: String, officialPreview: SongPlaybackInfo): StrictAudioVerification? {
-            calls++
-            referenceStart = officialPreview.referenceStartMs
-            onVerify()
-            // 流程单测中的宿主 stub；真正的 PCM 算法由 Android 独立回归覆盖。
-            return if (accepted) StrictAudioVerification("bound-evidence-for-100", 6_000, 0.995) else null
-        }
-    }
 
     private suspend fun preferences(strict: Boolean): SourcePreferences = SourcePreferences(InMemoryPreferencesStore()).also {
-        it.saveFallbackEnabled(true)
-        it.saveCommunityPriority(true)
-        it.saveStrictFallbackEnabled(strict)
+        it.saveFallbackEnabled(true); it.saveCommunityPriority(true); it.saveStrictFallbackEnabled(strict)
     }
-
-    private fun router(prefs: SourcePreferences, provider: Provider, verifier: StrictAudioVerifier? = null,
-        official: SongPlaybackInfo? = preview): AudioSourceRouter = AudioSourceRouter(
+    private fun router(prefs: SourcePreferences, provider: Provider, official: SongPlaybackInfo? = preview) = AudioSourceRouter(
         Delegate(official, target), UnmApiClient(), prefs, SettingsPreferences(InMemoryPreferencesStore()),
-        NetworkStateProvider { true }, listOf(provider), verifier
-    )
+        NetworkStateProvider { true }, listOf(provider))
 
-    @Test fun `关闭严格模式时保留旧裸 URL 播放行为但不冒充已核验`() = runBlocking {
-        val provider = Provider(bareResult)
-        val info = router(preferences(false), provider).getSongPlaybackInfo(100).first().getOrThrow()
-        assertEquals(bareResult.url, info.url)
-        assertEquals(PlaybackSourceKind.COMMUNITY, info.sourceKind)
-        assertFalse(info.strictVerified)
+    @Test fun ordinaryModePreservesBareUrlCompatibility() = runBlocking {
+        val info = router(preferences(false), Provider(bareResult)).getSongPlaybackInfo(100).first().getOrThrow()
+        assertEquals(PlaybackSourceKind.COMMUNITY, info.sourceKind); assertFalse(info.strictVerified)
     }
-
-    @Test fun `严格完整官方结果可直接播放无需插件或片段核验`() = runBlocking {
-        val provider = Provider(bareResult)
-        val verifier = Verifier()
-        val full = preview.copy(isFreeTrial = false)
-        val info = router(preferences(true), provider, verifier, full).getSongPlaybackInfo(100).first().getOrThrow()
-        assertEquals(full, info)
-        assertEquals(0, provider.calls)
-        assertEquals(0, verifier.calls)
-    }
-
-    @Test fun `未显式声明来源的旧结果不能当可信官方直链`() = runBlocking {
-        val provider = Provider(bareResult)
-        val unknown = SongPlaybackInfo("https://unknown.invalid/full.mp3")
-        assertTrue(router(preferences(true), provider, Verifier(), unknown).getSongPlaybackInfo(100).first().isFailure)
+    @Test fun fullOfficialAudioDoesNotNeedAlternateSources() = runBlocking {
+        val provider = Provider(bareResult); val full = preview.copy(isFreeTrial = false)
+        assertEquals(full, router(preferences(true), provider, full).getSongPlaybackInfo(100).first().getOrThrow())
         assertEquals(0, provider.calls)
     }
-
-    @Test fun `缺宿主核验器时保留安全官方试听且不调用插件`() = runBlocking {
+    @Test fun matchingMetadataWorksWithoutAnyOfficialAudioOrPreview() = runBlocking {
         val provider = Provider(candidateResult)
-        val info = router(preferences(true), provider).getSongPlaybackInfo(100).first().getOrThrow()
-        assertEquals(preview.url, info.url)
-        assertTrue(info.trialFallback)
-        assertEquals(0, provider.calls)
-    }
-
-    @Test fun `无可信官方参考时严格拒绝社区音频`() = runBlocking {
-        val provider = Provider(candidateResult)
-        assertTrue(router(preferences(true), provider, Verifier(), null).getSongPlaybackInfo(100).first().isFailure)
-        assertEquals(0, provider.calls)
-    }
-
-    @Test fun `试听起点缺失或非法时不等待插件解析而直接保留官方试听`() = runBlocking {
-        listOf<Long?>(null, -1L).forEach { start ->
-            val provider = Provider(candidateResult)
-            val verifier = Verifier()
-            val official = preview.copy(referenceStartMs = start)
-            val info = router(preferences(true), provider, verifier, official).getSongPlaybackInfo(100).first().getOrThrow()
-            assertEquals(official.url, info.url)
-            assertTrue(info.trialFallback)
-            assertEquals(0, provider.calls)
-            assertEquals(0, verifier.calls)
-        }
-    }
-
-    @Test fun `裸 URL 不能靠存在核验器自动升级证据`() = runBlocking {
-        val verifier = Verifier()
-        val info = router(preferences(true), Provider(bareResult), verifier).getSongPlaybackInfo(100).first().getOrThrow()
-        assertEquals(preview.url, info.url)
-        assertEquals(0, verifier.calls)
-        assertFalse(info.strictVerified)
-    }
-
-    @Test fun `候选来源和歌曲标识不一致时在请求音频前拒绝`() = runBlocking {
-        val verifier = Verifier()
-        val mismatched = candidateResult.copy(resolvedSongId = "OTHER")
-        val info = router(preferences(true), Provider(mismatched), verifier).getSongPlaybackInfo(100).first().getOrThrow()
-        assertEquals(preview.url, info.url)
-        assertEquals(0, verifier.calls)
-    }
-
-    @Test fun `候选元数据正确仍必须实际音频比对通过`() = runBlocking {
-        val verifier = Verifier(accepted = false)
-        val info = router(preferences(true), Provider(candidateResult), verifier).getSongPlaybackInfo(100).first().getOrThrow()
-        assertEquals(preview.url, info.url)
-        assertEquals(1, verifier.calls)
-        assertFalse(info.strictVerified)
-    }
-
-    @Test fun `宿主实际核验通过产生可播放的严格来源与绑定证据`() = runBlocking {
-        val verifier = Verifier()
-        val info = router(preferences(true), Provider(candidateResult), verifier).getSongPlaybackInfo(100).first().getOrThrow()
-        assertEquals(candidateResult.url, info.url)
+        val info = router(preferences(true), provider, null).getSongPlaybackInfo(100).first().getOrThrow()
+        assertEquals(candidateResult.url, info.url); assertTrue(info.strictVerified)
         assertEquals(PlaybackSourceKind.STRICT_VERIFIED, info.sourceKind)
-        assertTrue(info.strictVerified)
-        assertEquals("bound-evidence-for-100", info.cacheIdentity)
-        assertEquals(30_000L, verifier.referenceStart)
+        assertEquals(64, info.cacheIdentity?.length); assertEquals(1, provider.calls)
     }
-
-    @Test fun `无绑定或过短低分非有限的宿主证据均不能放行`() = runBlocking {
-        listOf(StrictAudioVerification("", 6_000, 0.995), StrictAudioVerification("bound", 3_000, 0.995),
-            StrictAudioVerification("bound", 6_000, 0.93), StrictAudioVerification("bound", 6_000, Double.NaN),
-            StrictAudioVerification("bound", 6_000, Double.POSITIVE_INFINITY)).forEach { evidence ->
-            val verifier = object : StrictAudioVerifier {
-                override suspend fun verify(targetTrack: Track, candidateUrl: String,
-                    officialPreview: SongPlaybackInfo) = evidence
+    @Test fun missingPreviewOffsetDoesNotBlockMetadataMatching() = runBlocking {
+        val info = router(preferences(true), Provider(candidateResult), preview.copy(referenceStartMs = null))
+            .getSongPlaybackInfo(100).first().getOrThrow()
+        assertTrue(info.strictVerified); assertFalse(info.isFreeTrial)
+    }
+    @Test fun bareUrlIsNeverACompleteMetadataMatch() = runBlocking {
+        val info = router(preferences(true), Provider(bareResult)).getSongPlaybackInfo(100).first().getOrThrow()
+        assertEquals(preview.url, info.url); assertFalse(info.strictVerified)
+        assertTrue(router(preferences(true), Provider(bareResult), null).getSongPlaybackInfo(100).first().isFailure)
+    }
+    @Test fun wrongSongArtistAlbumDurationOrLiveVersionCannotPass() = runBlocking {
+        listOf(candidate.copy(name = "Other"), candidate.copy(artists = "Other", artistList = listOf("Other")),
+            candidate.copy(albumName = "Other Album"), candidate.copy(durationMs = 100_000),
+            candidate.copy(name = "龙拳 (Live)"), candidate.copy(albumName = "八度空间 (Live)"))
+            .forEach { wrong ->
+                assertTrue(router(preferences(true), Provider(candidateResult.copy(candidate = wrong)), null)
+                    .getSongPlaybackInfo(100).first().isFailure)
             }
-            val info = router(preferences(true), Provider(candidateResult), verifier).getSongPlaybackInfo(100).first().getOrThrow()
-            assertEquals(preview.url, info.url)
-            assertFalse(info.strictVerified)
-        }
     }
-
-    @Test fun `解析过程中开启严格模式不能返回旧裸 URL`() = runBlocking {
-        val prefs = preferences(false)
-        val provider = Provider(bareResult) { prefs.saveStrictFallbackEnabled(true) }
-        assertTrue(router(prefs, provider).getSongPlaybackInfo(100).first().isFailure)
+    @Test fun remasteredAndDeluxeEditionsOfTheSameAlbumPass() = runBlocking {
+        val remaster = candidate.copy(name = "龙拳 (2014 Remaster)", albumName = "八度空间 (Deluxe Edition)")
+        assertTrue(router(preferences(true), Provider(candidateResult.copy(candidate = remaster)), null)
+            .getSongPlaybackInfo(100).first().getOrThrow().strictVerified)
     }
-
-    @Test fun `核验过程中切换模式也丢弃旧结果`() = runBlocking {
+    @Test fun candidatePlatformAndSongIdMustMatchTheResolvedSource() = runBlocking {
+        listOf(candidateResult.copy(resolvedSongId = "OTHER"), candidateResult.copy(resolvedPlatform = MusicPlatform.KUWO))
+            .forEach { wrong -> assertTrue(router(preferences(true), Provider(wrong), null)
+                .getSongPlaybackInfo(100).first().isFailure) }
+    }
+    @Test fun proofIsBoundToTheResolvedUrl() = runBlocking {
         val prefs = preferences(true)
-        val verifier = Verifier { prefs.saveStrictFallbackEnabled(false) }
-        assertTrue(router(prefs, Provider(candidateResult), verifier).getSongPlaybackInfo(100).first().isFailure)
+        val a = router(prefs, Provider(candidateResult), null).getSongPlaybackInfo(100).first().getOrThrow()
+        val b = router(prefs, Provider(candidateResult.copy(url = "https://community.invalid/other.mp3")), null)
+            .getSongPlaybackInfo(100).first().getOrThrow()
+        assertFalse(a.cacheIdentity == b.cacheIdentity)
     }
-
-    @Test fun `取消不能被吞掉后继续尝试其他来源`() = runBlocking {
+    @Test fun changingModeDuringResolutionDiscardsTheOldResult() = runBlocking {
+        val prefs = preferences(true)
+        val provider = Provider(candidateResult) { prefs.saveStrictFallbackEnabled(false) }
+        assertTrue(router(prefs, provider, null).getSongPlaybackInfo(100).first().isFailure)
+    }
+    @Test fun cancellationPropagatesRatherThanTryingOtherSources() = runBlocking {
         val provider = Provider(bareResult) { throw CancellationException("cancelled") }
         var cancelled = false
-        try { router(preferences(false), provider).getSongPlaybackInfo(100).first() }
+        try { router(preferences(true), provider, null).getSongPlaybackInfo(100).first() }
         catch (_: CancellationException) { cancelled = true }
         assertTrue(cancelled)
     }

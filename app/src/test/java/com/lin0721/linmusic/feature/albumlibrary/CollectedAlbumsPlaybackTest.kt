@@ -11,6 +11,15 @@ import org.junit.Test
 import kotlin.random.Random
 
 class CollectedAlbumsPlaybackTest {
+    @Test fun unavailableAlbumsCanBeReportedAndSkippedWithoutBreakingTheOtherAlbumBlocks() = runTest {
+        val skipped = mutableListOf<Long>()
+        val queue = CollectedAlbumsPlayback.prepare((1L..3L).map { AlbumSubItem(it) }, false,
+            { if (it.id == 2L) error("unavailable") else tracks(it.id) }, onSkipped = { skipped += it.id })
+        assertEquals(listOf(11L, 12L, 31L, 32L), queue.map { it.songId })
+        assertEquals(listOf(2L), skipped)
+        assertTrue(runCatching { CollectedAlbumsPlayback.prepare(listOf(AlbumSubItem(2)), false,
+            { error("unavailable") }, onSkipped = {}) }.isFailure)
+    }
     private val albums = (1L..7L).map { AlbumSubItem(it, "Album $it") }
     private fun tracks(id: Long) = listOf(Track(id * 10 + 1), Track(id * 10 + 2))
 

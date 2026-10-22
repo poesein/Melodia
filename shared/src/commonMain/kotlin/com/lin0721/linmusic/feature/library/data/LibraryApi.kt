@@ -76,7 +76,8 @@ data class AlbumSubItem(
     val picUrl: String = "",
     val artists: List<Artist> = emptyList(),
     val size: Int = 0,
-    val subTime: Long = 0
+    val subTime: Long = 0,
+    val publishTime: Long = 0
 )
 
 // 服务端不返回专辑收藏数，专辑计数需取收藏专辑列表长度

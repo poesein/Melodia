@@ -131,7 +131,7 @@ fun AudioSourcesSettingsView(viewModel: SettingsViewModel) {
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
                 SettingsSwitchRow(
                     title = "严格换源模式",
-                    subtitle = "默认关闭。换源需通过歌曲与版本筛选，并与官方试听音频片段比对；缺少参考或无法核验则不播放。开启时绕过旧播放缓存并重新取链，本地音乐、已有关联和下载保留。核验会增加等待与流量，片段一致不能保证整曲。",
+                    subtitle = "严格核对歌曲名、歌手和专辑；双方提供时长、版本等信息时进一步检查。不依赖官方试听，不额外下载音频做比对。匹配不到则不播放；本地音乐、已有关联和下载保留。",
                     checked = strictFallbackEnabled,
                     onCheckedChange = { viewModel.updateStrictFallbackEnabled(it) }
                 )

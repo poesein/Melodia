@@ -82,7 +82,8 @@ class PlaylistRepositoryImpl(
                         description = album.description,
                         playCount = 0L,
                         tracks = filteredTracks,
-                        artists = album.artists
+                        artists = album.artists,
+                        publishTime = album.publishTime
                     )
                 }
             )
