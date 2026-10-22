@@ -1,5 +1,7 @@
 package com.lin0721.linmusic.feature.settings.ui
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -59,6 +61,8 @@ fun BottomBarCustomizationSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { scrollState.canScrollForward }
     val haptic = LocalHapticFeedback.current
     val currentOnLayoutChange by rememberUpdatedState(onLayoutChange)
 
@@ -122,7 +126,7 @@ fun BottomBarCustomizationSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .nestedScroll(boundary).verticalScroll(scrollState)
                 .navigationBarsPadding()
                 .padding(horizontal = MelodiaSpacing.lg)
                 .padding(bottom = MelodiaSpacing.lg)

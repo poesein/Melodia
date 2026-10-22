@@ -30,11 +30,13 @@ class LibraryPageLayoutRepositoryTest {
             sections = it.moved(LibraryPage.PERSONAL, "artists", -1).sections.map { section -> if (section.key == "local_recent") section.copy(visible = true) else section }) }
         repository.update(LibraryPage.LOCAL) { it.copy(sections = it.sections.map { section -> section.copy(visible = section.key != "recent") }) }
         repository.update(LibraryPage.LOCAL) { it.copy(itemLimits = mapOf("artists" to 0), itemOrders = mapOf("albums" to listOf("album2", "album1"))) }
+        repository.update(LibraryPage.PERSONAL) { it.copy(visiblePlaylistIds = setOf("-2", "10", "offline_saved")) }
         scope.cancel(); scope.coroutineContext[Job]!!.join()
         val restarted = LibraryPageLayoutRepository(store(backgroundScope, file))
         val personal = restarted.observe(LibraryPage.PERSONAL).first()
         assertEquals("artists", personal.sections.first().key)
         assertEquals(2, personal.listColumns); assertEquals(5, personal.playlistColumns)
+        assertEquals(setOf("-2", "10", "offline_saved"), personal.visiblePlaylistIds)
         assertTrue(personal.sections.take(3).all { it.visible })
         assertTrue(personal.sections.first { it.key == "local_recent" }.visible)
         assertTrue(personal.sections.drop(3).filterNot { it.key == "local_recent" }.none { it.visible })

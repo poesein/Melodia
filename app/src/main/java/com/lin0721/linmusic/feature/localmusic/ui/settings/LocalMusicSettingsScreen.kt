@@ -63,6 +63,7 @@ private const val MIN_DURATION_STEP_SEC = 10
 
 private val DividerColor = Color.White.copy(alpha = 0.08f)
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LocalMusicSettingsScreen(
     onBack: () -> Unit,

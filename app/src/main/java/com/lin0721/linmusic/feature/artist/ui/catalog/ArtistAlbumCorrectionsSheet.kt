@@ -1,5 +1,9 @@
 package com.lin0721.linmusic.feature.artist.ui.catalog
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -42,14 +46,17 @@ fun ArtistAlbumCorrectionsSheet(
     onEntryActive: (Long, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val listState = rememberLazyListState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { listState.canScrollForward }
     ModalBottomSheet(onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.background, shape = BottomSheetShape,
         dragHandle = { MelodiaDragHandle() }) {
         ArtistAlbumCorrectionsContent(artistName, sourceAlbums, automaticAlbums, state, catalogEnabled,
             hasMore, loadingMore, loadError, onRetryAlbums, onRetryRecords, onEnabledChanged,
             onDecision, onEntryActive, onDismiss,
-            Modifier.fillMaxWidth().fillMaxHeight(0.9f).navigationBarsPadding())
+            Modifier.fillMaxWidth().fillMaxHeight(0.9f).navigationBarsPadding().nestedScroll(boundary), listState)
     }
 }
 
@@ -70,7 +77,8 @@ internal fun ArtistAlbumCorrectionsContent(
     onDecision: (ArtistAlbum, Boolean) -> Unit,
     onEntryActive: (Long, Boolean) -> Unit,
     onDismiss: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState()
 ) {
     var query by rememberSaveable(state.artistId) { mutableStateOf("") }
     var filter by rememberSaveable(state.artistId) { mutableIntStateOf(0) }
@@ -96,7 +104,7 @@ internal fun ArtistAlbumCorrectionsContent(
     Column(modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("手动修正专辑", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("$artistName · 仅调整此歌手的展示列表", style = MaterialTheme.typography.bodySmall)
-        LazyColumn(Modifier.weight(1f).testTag("album_corrections_list")) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).testTag("album_corrections_list")) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

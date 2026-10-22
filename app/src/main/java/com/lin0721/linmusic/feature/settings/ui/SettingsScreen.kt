@@ -45,6 +45,7 @@ import com.lin0721.linmusic.core.ui.theme.MelodiaSpacing
 
 // 定义多级菜单类型。sectionTitles 与子页面 SettingsGroupCard 的标题及顺序一致，子页面按下标引用；主菜单预览取前两项
 enum class SettingsSubMenu(val title: String, val sectionTitles: List<String>, val icon: ImageVector) {
+    PERSONAL_LIBRARY("个人音乐库", listOf("显示歌单", "布局与栏目"), Icons.Outlined.LibraryMusic),
     PLAYBACK_DOWNLOAD("播放与下载", listOf("播放参数", "下载与缓存"), Icons.Outlined.PlayCircleOutline),
     AUDIO_QUALITY("音质", listOf("默认音质", "播放页显示"), Icons.Outlined.HighQuality),
     AUDIO_SOURCES("音源设置", listOf("换源基础设置", "社区扩展源", "远程 UNM 服务"), Icons.AutoMirrored.Outlined.QueueMusic),
@@ -250,6 +251,7 @@ private fun SubMenuContent(
             .padding(horizontal = MelodiaSpacing.md)
     ) {
         when (subMenu) {
+            SettingsSubMenu.PERSONAL_LIBRARY -> com.lin0721.linmusic.feature.personallibrary.PersonalLibrarySettingsView()
             SettingsSubMenu.PLAYBACK_DOWNLOAD -> PlaybackDownloadSettingsView(viewModel)
             SettingsSubMenu.AUDIO_QUALITY -> AudioQualitySettingsView(viewModel)
             SettingsSubMenu.AUDIO_SOURCES -> AudioSourcesSettingsView(viewModel)

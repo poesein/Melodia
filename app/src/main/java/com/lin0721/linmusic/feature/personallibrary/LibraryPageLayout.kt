@@ -19,7 +19,9 @@ data class LibraryPageLayout(
     val listColumns: Int = 1,
     val coverColumns: Int = 3,
     val itemLimits: Map<String, Int> = emptyMap(),
-    val itemOrders: Map<String, List<String>> = emptyMap()
+    val itemOrders: Map<String, List<String>> = emptyMap(),
+    // null preserves beta.23's default of showing every playlist. Explicit choices form an allow-list.
+    val visiblePlaylistIds: Set<String>? = null
 ) {
     fun normalized(page: LibraryPage): LibraryPageLayout {
         val known = page.sections.map { it.first }
@@ -30,7 +32,8 @@ data class LibraryPageLayout(
             playlistMode = if (playlistMode == "covers") "covers" else "list",
             listColumns = listColumns.coerceIn(1, 5), coverColumns = coverColumns.coerceIn(1, 5),
             itemLimits = itemLimits.filterKeys { it in known && supportsItemLimit(it) }.mapValues { it.value.coerceIn(0, 5000) },
-            itemOrders = itemOrders.filterKeys { it in known && supportsItemOrder(it) }.mapValues { (_, ids) -> ids.filter { it.isNotBlank() }.distinct() })
+            itemOrders = itemOrders.filterKeys { it in known && supportsItemOrder(it) }.mapValues { (_, ids) -> ids.filter { it.isNotBlank() }.distinct() },
+            visiblePlaylistIds = visiblePlaylistIds?.filterTo(linkedSetOf()) { it.isNotBlank() })
     }
 
     fun moved(page: LibraryPage, key: String, direction: Int): LibraryPageLayout {
@@ -45,6 +48,13 @@ data class LibraryPageLayout(
     }
 
     val playlistColumns: Int get() = if (playlistMode == "covers") coverColumns else listColumns
+
+    fun playlistIsVisible(id: String): Boolean = visiblePlaylistIds?.contains(id) ?: true
+
+    fun setPlaylistVisible(id: String, show: Boolean, availableIds: Set<String>): LibraryPageLayout {
+        val selected = visiblePlaylistIds ?: availableIds
+        return copy(visiblePlaylistIds = if (show) selected + id else selected - id)
+    }
 
     fun itemLimit(key: String): Int = itemLimits[key]?.coerceIn(0, 5000) ?: 10
 

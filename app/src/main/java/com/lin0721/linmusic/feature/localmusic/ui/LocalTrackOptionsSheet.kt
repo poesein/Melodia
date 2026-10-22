@@ -1,5 +1,7 @@
 package com.lin0721.linmusic.feature.localmusic.ui
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -69,6 +71,8 @@ fun LocalTrackOptionsSheet(
     onRemoveFromPlaylistClick: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { scrollState.canScrollForward }
     val scope = rememberCoroutineScope()
 
     fun runThenHide(action: () -> Unit) {
@@ -88,7 +92,7 @@ fun LocalTrackOptionsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .nestedScroll(boundary).verticalScroll(scrollState)
                 .navigationBarsPadding()
                 .padding(bottom = MelodiaSpacing.md)
         ) {

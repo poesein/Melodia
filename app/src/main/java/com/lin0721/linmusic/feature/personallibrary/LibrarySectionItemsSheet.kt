@@ -1,5 +1,9 @@
 package com.lin0721.linmusic.feature.personallibrary
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -38,16 +42,20 @@ internal fun personalLayoutCatalog(items: List<LibraryItem>, local: PersonalLoca
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LibrarySectionItemsSheet(page: LibraryPage, section: String, state: LibraryPageLayoutState,
-    items: List<LibrarySortItem>, onSave: ((LibraryPageLayout) -> LibraryPageLayout) -> Unit, onDismiss: () -> Unit) {
+    items: List<LibrarySortItem>, onSave: ((LibraryPageLayout) -> LibraryPageLayout) -> Unit, onDismiss: () -> Unit,
+    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    listState: LazyListState = rememberLazyListState()) {
     val title = page.sections.first { it.first == section }.second
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        LibrarySectionItemsContent(title, section, state, items, onSave, onDismiss)
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { listState.canScrollForward }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        LibrarySectionItemsContent(title, section, state, items, onSave, onDismiss, listState, Modifier.nestedScroll(boundary))
     }
 }
 
 @Composable
 internal fun LibrarySectionItemsContent(title: String, section: String, state: LibraryPageLayoutState,
-    items: List<LibrarySortItem>, onSave: ((LibraryPageLayout) -> LibraryPageLayout) -> Unit, onDismiss: () -> Unit) {
+    items: List<LibrarySortItem>, onSave: ((LibraryPageLayout) -> LibraryPageLayout) -> Unit, onDismiss: () -> Unit,
+    listState: LazyListState = rememberLazyListState(), modifier: Modifier = Modifier) {
     val enabled = state.loaded && !state.saving
     var query by rememberSaveable(section) { mutableStateOf("") }
     var limit by rememberSaveable(section, state.layout.itemLimit(section)) { mutableStateOf(state.layout.itemLimit(section).toString()) }
@@ -55,7 +63,7 @@ internal fun LibrarySectionItemsContent(title: String, section: String, state: L
     val ordered = remember(items, state.layout.itemOrders[section]) { state.layout.orderedItems(section, items) { it.id } }
     val filtered = remember(ordered, query) { ordered.filter { query.isBlank() || it.title.contains(query, true) || it.subtitle.contains(query, true) } }
     val positions = remember(ordered) { ordered.withIndex().associate { it.value.id to it.index } }
-    Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 16.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("$title · 显示与排序", style = MaterialTheme.typography.titleLarge)
         if (supportsItemLimit(section)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -71,7 +79,7 @@ internal fun LibrarySectionItemsContent(title: String, section: String, state: L
         OutlinedTextField(query, { query = it }, label = { Text("查找要排序的条目") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Text("置顶、上移或下移直接保存；查找时仍按完整列表移动。新增条目排在已排序条目之后。", style = MaterialTheme.typography.bodySmall)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        LazyColumn(Modifier.weight(1f).testTag("library_section_items")) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).testTag("library_section_items")) {
             itemsIndexed(filtered, key = { _, item -> item.id }) { _, item ->
                 val index = positions.getValue(item.id)
                 Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {

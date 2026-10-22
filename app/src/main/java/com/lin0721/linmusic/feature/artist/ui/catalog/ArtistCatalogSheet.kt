@@ -1,5 +1,8 @@
 package com.lin0721.linmusic.feature.artist.ui.catalog
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -53,9 +56,12 @@ fun ArtistCatalogSheet(
     onRestoreAll: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val listState = rememberLazyListState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { listState.canScrollForward }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.background,
         shape = BottomSheetShape,
         dragHandle = { MelodiaDragHandle() }
@@ -101,7 +107,7 @@ fun ArtistCatalogSheet(
                     if (state.searched && !state.loading && state.candidates.isEmpty() && state.error == null) {
                         Text("未找到资料库歌手，可尝试其他名称或别名。", style = MaterialTheme.typography.bodySmall)
                     }
-                    LazyColumn(Modifier.weight(1f)) {
+                    LazyColumn(state = listState, modifier = Modifier.weight(1f).nestedScroll(boundary)) {
                         items(state.candidates, key = { it.id }) { candidate ->
                             Row(Modifier.fillMaxWidth().clickable(enabled = !state.saving) { onBind(candidate) }
                                 .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {

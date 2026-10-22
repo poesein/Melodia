@@ -1,5 +1,8 @@
 package com.lin0721.linmusic.feature.playlist.ui
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -43,6 +46,8 @@ fun PlaylistImportTargetSheet(
     onCreateAndImport: (String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val listState = rememberLazyListState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { listState.canScrollForward }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -78,7 +83,8 @@ fun PlaylistImportTargetSheet(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier
+                    state = listState,
+                    modifier = Modifier.nestedScroll(boundary)
                         .fillMaxWidth()
                         .heightIn(max = 300.dp),
                     verticalArrangement = Arrangement.spacedBy(MelodiaSpacing.sm)

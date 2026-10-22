@@ -1,5 +1,8 @@
 package com.lin0721.linmusic.feature.localmusic.ui
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -64,9 +67,12 @@ fun LocalOnlineAssociationSheet(
     onLoadMore: () -> Unit,
     onConfirm: (Track) -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val listState = rememberLazyListState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { listState.canScrollForward }
     ModalBottomSheet(
         onDismissRequest = { if (!state.saving) onDismiss() },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.background,
         shape = BottomSheetShape,
         dragHandle = { MelodiaDragHandle() }
@@ -76,7 +82,7 @@ fun LocalOnlineAssociationSheet(
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             LocalOnlineAssociationContent(state, onQueryChange, onSearch, onLoadMore, onConfirm,
-                modifier = Modifier.weight(1f))
+                modifier = Modifier.weight(1f).nestedScroll(boundary), listState = listState)
         }
     }
 }
@@ -89,10 +95,10 @@ internal fun LocalOnlineAssociationContent(
     onSearch: () -> Unit,
     onLoadMore: () -> Unit,
     onConfirm: (Track) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState()
 ) {
     var searchExpanded by rememberSaveable(state.track.uri.toString()) { mutableStateOf(state.results.isEmpty()) }
-    val listState = rememberLazyListState()
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0

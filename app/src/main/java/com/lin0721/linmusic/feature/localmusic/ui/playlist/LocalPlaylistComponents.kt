@@ -1,5 +1,8 @@
 package com.lin0721.linmusic.feature.localmusic.ui.playlist
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -117,9 +120,12 @@ fun LocalPlaylistPickerSheet(
     val trackUris = remember(tracks) { tracks.mapTo(HashSet()) { it.uri.toString() } }
     val single = tracks.singleOrNull()
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val listState = rememberLazyListState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { listState.canScrollForward }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         containerColor = BackgroundDark,
         shape = BottomSheetShape,
         dragHandle = { MelodiaDragHandle() }
@@ -134,7 +140,7 @@ fun LocalPlaylistPickerSheet(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = MelodiaSpacing.md, vertical = MelodiaSpacing.sm)
             )
-            LazyColumn {
+            LazyColumn(state = listState, modifier = Modifier.nestedScroll(boundary)) {
                 item(key = "create") {
                     PickerRow(
                         leading = { NewPlaylistTile(size = 44.dp) },

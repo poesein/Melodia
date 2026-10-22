@@ -1,7 +1,6 @@
 package com.lin0721.linmusic.feature.personallibrary
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -26,6 +25,7 @@ import com.lin0721.linmusic.feature.localmusic.ui.LocalMusicNavigation
 fun PersonalLibraryScreen(onPlaylistClick: (Long) -> Unit, onArtistClick: (Long) -> Unit,
     onAlbumClick: (Long) -> Unit, onLocalMusic: () -> Unit, onSearch: () -> Unit, onRecognition: () -> Unit,
     localNavigation: LocalMusicNavigation,
+    onOpenSidebar: () -> Unit,
     onLoginScreenVisibilityChanged: (Boolean) -> Unit,
     viewModel: LibraryViewModel = koinViewModel(key = "personal-library-data"),
     layoutModel: LibraryPageLayoutViewModel = koinViewModel()) {
@@ -34,10 +34,8 @@ fun PersonalLibraryScreen(onPlaylistClick: (Long) -> Unit, onArtistClick: (Long)
     val layouts by layoutModel.state.collectAsStateWithLifecycle()
     val layoutState = layouts.getValue(LibraryPage.PERSONAL)
     val displayedLayout = layoutState.layout.withLocalShelfSettings(layouts.getValue(LibraryPage.LOCAL).layout)
-    var settings by rememberSaveable { mutableStateOf(false) }
-    var managedSection by rememberSaveable { mutableStateOf<String?>(null) }
     val onlineVisible = layoutState.layout.normalized(LibraryPage.PERSONAL).sections.any { it.visible && !it.key.startsWith("local_") }
-    val local = if (settings || managedSection?.startsWith("local_") == true || layoutState.layout.normalized(LibraryPage.PERSONAL).sections.any { it.visible && it.key.startsWith("local_") }) {
+    val local = if (layoutState.layout.normalized(LibraryPage.PERSONAL).sections.any { it.visible && it.key.startsWith("local_") }) {
         rememberPersonalLocalLibrary(localNavigation)
     } else null
     var createMenu by remember { mutableStateOf(false) }
@@ -67,19 +65,17 @@ fun PersonalLibraryScreen(onPlaylistClick: (Long) -> Unit, onArtistClick: (Long)
         contentColor = MaterialTheme.colorScheme.onBackground) {
       Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
-                PersonalLibraryToolbar({ settings = true }, onLocalMusic, onSearch, onRecognition, { createMenu = true })
-                Box(Modifier.padding(end = 40.dp).width(56.dp).height(56.dp)) {
-                  DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
+            PersonalLibraryToolbar(profile?.avatarUrl, { if (profile == null) login = true else onOpenSidebar() },
+                onLocalMusic, onSearch, onRecognition, { createMenu = true }, createMenu = {
+                DropdownMenu(expanded = createMenu, onDismissRequest = { createMenu = false }) {
                     DropdownMenuItem(text = { Text("新建歌单") }, onClick = {
                         createMenu = false; if (profile == null) login = true else create = true
                     })
                     DropdownMenuItem(text = { Text("导入歌单（TXT / 文本）") }, onClick = {
                         createMenu = false; if (profile == null) login = true else importing = true
                     })
-                  }
                 }
-            }
+            })
             PersonalLibraryContent(items, displayedLayout, ::open, { collection = it },
                 local = local?.data, localActions = local?.actions ?: PersonalLocalActions(), onlineStatus = {
               when {
@@ -96,21 +92,6 @@ fun PersonalLibraryScreen(onPlaylistClick: (Long) -> Unit, onArtistClick: (Long)
                 else -> Unit
               }
             })
-        }
-        if (settings) ModalBottomSheet(onDismissRequest = { settings = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-            LazyColumn(contentPadding = PaddingValues(20.dp), modifier = Modifier.navigationBarsPadding()) {
-                item { Text("个人音乐库样式", style = MaterialTheme.typography.titleLarge) }
-                item { LibraryPageLayoutEditor(LibraryPage.PERSONAL, layoutState.copy(layout = displayedLayout), onManageSection = { managedSection = it; settings = false }) { layoutModel.save(LibraryPage.PERSONAL, it) } }
-                item { TextButton(onClick = { settings = false }, modifier = Modifier.fillMaxWidth()) { Text("完成") } }
-            }
-        }
-        managedSection?.let { section ->
-            val targetPage = if (section.startsWith("local_")) LibraryPage.LOCAL else LibraryPage.PERSONAL
-            val targetKey = if (targetPage == LibraryPage.LOCAL) localSectionKey(section) else section
-            LibrarySectionItemsSheet(targetPage, targetKey, layouts.getValue(targetPage),
-                personalLayoutCatalog(items, local?.data)[section].orEmpty(),
-                onSave = { layoutModel.save(targetPage, it) }, onDismiss = { managedSection = null; settings = true })
         }
         collection?.let { type -> PersonalLibraryCollectionSheet(type, items.filter { it.type == type }, layoutState.layout, ::open, { collection = null }) }
         if (create) LibraryCreatePlaylistSheet(onDismiss = { create = false }, onCreate = { viewModel.createPlaylist(it); create = false })

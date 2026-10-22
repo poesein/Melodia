@@ -1,5 +1,7 @@
 package com.lin0721.linmusic.feature.player.ui
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -87,6 +89,7 @@ fun PlayQueueSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { listState.canScrollForward }
     val scope = rememberCoroutineScope()
     val isRoaming = playContext == "similar_roaming"
 
@@ -303,7 +306,7 @@ fun PlayQueueSheet(
                 state = listState,
                 // 拖拽时滚动完全交给自动滚屏协程接管
                 userScrollEnabled = !isDraggingActive,
-                modifier = Modifier
+                modifier = Modifier.nestedScroll(boundary)
                     .weight(1f)
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(bottom = 8.dp)

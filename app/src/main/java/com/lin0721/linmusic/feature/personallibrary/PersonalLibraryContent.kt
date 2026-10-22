@@ -1,6 +1,7 @@
 package com.lin0721.linmusic.feature.personallibrary
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -8,16 +9,24 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -26,6 +35,10 @@ import coil3.compose.SubcomposeAsyncImage
 import com.lin0721.linmusic.LocalBottomOverlayInset
 import com.lin0721.linmusic.core.ui.components.CoverPlaceholder
 import com.lin0721.linmusic.core.ui.components.MelodiaIconButton
+import com.lin0721.linmusic.core.ui.interaction.pressable
+import com.lin0721.linmusic.core.ui.theme.MelodiaPress
+import com.lin0721.linmusic.core.ui.theme.LibraryBlueGreenGradient
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
 import com.lin0721.linmusic.feature.library.ui.LibraryItem
 import com.lin0721.linmusic.feature.library.ui.LibraryItemType
 import com.lin0721.linmusic.feature.localmusic.ui.components.LocalSectionHeader
@@ -35,15 +48,35 @@ internal fun playlistPreviewRows(items: List<LibraryItem>, columns: Int): List<L
     items.take(5 * columns.coerceIn(1, 5)).chunked(columns.coerceIn(1, 5))
 
 @Composable
-internal fun PersonalLibraryToolbar(onSettings: () -> Unit, onLocal: () -> Unit,
-    onSearch: () -> Unit, onRecognition: () -> Unit, onCreate: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        MelodiaIconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "个人音乐库样式设置") }
-        Spacer(Modifier.weight(1f))
+internal fun PersonalLibraryToolbar(avatarUrl: String?, onAvatar: () -> Unit, onLocal: () -> Unit,
+    onSearch: () -> Unit, onRecognition: () -> Unit, onCreate: () -> Unit,
+    createMenu: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(36.dp).pressable(MelodiaPress.Icon, onClick = onAvatar).clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.15f)).semantics { contentDescription = "用户头像" }, contentAlignment = Alignment.Center) {
+            SubcomposeAsyncImage(model = avatarUrl?.takeIf { it.isNotBlank() }?.let { "$it?param=200y200" }, contentDescription = null,
+                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                loading = { PersonalAvatarPlaceholder() },
+                error = { PersonalAvatarPlaceholder() })
+        }
+        Spacer(Modifier.width(10.dp))
+        Text("音乐库", Modifier.weight(1f), fontSize = 22.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         MelodiaIconButton(onClick = onSearch) { Icon(Icons.Rounded.Search, "搜索音乐") }
-        MelodiaIconButton(onClick = onRecognition) { Icon(Icons.Rounded.Mic, "听歌识曲") }
-        MelodiaIconButton(onClick = onCreate) { Icon(Icons.Rounded.Add, "新建或导入歌单") }
+        MelodiaIconButton(onClick = onRecognition) { Icon(Icons.Rounded.MusicNote, "听歌识曲") }
+        Box {
+            MelodiaIconButton(onClick = onCreate) { Icon(Icons.Rounded.Add, "新建或导入歌单") }
+            createMenu()
+        }
         MelodiaIconButton(onClick = onLocal) { Icon(Icons.Rounded.Folder, "本地音乐") }
+    }
+}
+
+@Composable
+private fun PersonalAvatarPlaceholder() {
+    // Match HomeSharedHeader's personal avatar while the image is absent or unavailable.
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Icon(Icons.Default.Person, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -74,11 +107,12 @@ internal fun PersonalLibraryContent(items: List<LibraryItem>, layout: LibraryPag
                 "albums" -> LibraryItemType.ALBUM
                 else -> LibraryItemType.PLAYLIST
             }
-            val records = current.orderedItems(section.key, groups[type].orEmpty()) { it.id }
+            val records = current.orderedItems(section.key, groups[type].orEmpty()
+                .filter { type != LibraryItemType.PLAYLIST || current.playlistIsVisible(it.id) }) { it.id }
             val title = LibraryPage.PERSONAL.sections.first { it.first == section.key }.second
             item("${section.key}_header") { LocalSectionHeader(title, onMoreClick = { onMore(type) }) }
             if (records.isEmpty()) item("${section.key}_empty") {
-                Text("暂无$title", Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                Text(if (type == LibraryItemType.PLAYLIST && groups[type].orEmpty().isNotEmpty()) "没有选中歌单，可到设置 → 个人音乐库中选择" else "暂无$title", Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
             else if (type == LibraryItemType.PLAYLIST) {
@@ -104,13 +138,21 @@ internal fun PersonalLibraryContent(items: List<LibraryItem>, layout: LibraryPag
             }
         }
         if (current.sections.none { it.visible }) item("hidden_sections") {
-            Text("栏目已隐藏，可在左上角齿轮中重新显示", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("栏目已隐藏，可到设置 → 个人音乐库中重新显示", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun LibraryRemoteCover(item: LibraryItem, modifier: Modifier) {
+internal fun LibraryRemoteCover(item: LibraryItem, modifier: Modifier) {
+    // The virtual ranking playlist has no remote image; reuse the original library's offline gradient cover.
+    if (item.type == LibraryItemType.PLAYLIST && item.id == "-2") {
+        Box(modifier.clip(MaterialTheme.shapes.small).background(Brush.linearGradient(LibraryBlueGreenGradient))
+            .testTag("listening_rank_cover"), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.TrendingUp, "听歌排行歌单封面", Modifier.fillMaxSize(0.5f), tint = MaterialTheme.colorScheme.onSurface)
+        }
+        return
+    }
     SubcomposeAsyncImage(model = item.coverUrl.takeIf { it.isNotBlank() }, contentDescription = null,
         contentScale = ContentScale.Crop, loading = { CoverPlaceholder() }, error = { CoverPlaceholder() },
         modifier = modifier.clip(if (item.type == LibraryItemType.ARTIST) CircleShape else MaterialTheme.shapes.small))
@@ -149,15 +191,18 @@ private fun PersonalLibraryCover(item: LibraryItem, modifier: Modifier = Modifie
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun PersonalLibraryCollectionSheet(type: LibraryItemType, items: List<LibraryItem>, layout: LibraryPageLayout,
-    onItemClick: (LibraryItem) -> Unit, onDismiss: () -> Unit) {
+    onItemClick: (LibraryItem) -> Unit, onDismiss: () -> Unit,
+    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    gridState: LazyGridState = rememberLazyGridState()) {
     val title = when (type) { LibraryItemType.PLAYLIST -> "歌单"; LibraryItemType.ARTIST -> "歌手"; LibraryItemType.ALBUM -> "专辑" }
     val columns = if (type == LibraryItemType.PLAYLIST) layout.playlistColumns else 3
     val key = when (type) { LibraryItemType.PLAYLIST -> "playlists"; LibraryItemType.ARTIST -> "artists"; LibraryItemType.ALBUM -> "albums" }
-    val ordered = layout.orderedItems(key, items) { it.id }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    val ordered = layout.orderedItems(key, items.filter { type != LibraryItemType.PLAYLIST || layout.playlistIsVisible(it.id) }) { it.id }
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { gridState.canScrollForward }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.fillMaxHeight(0.9f).padding(horizontal = 16.dp).navigationBarsPadding()) {
-            Text("$title · ${items.size}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
-            LazyVerticalGrid(GridCells.Fixed(columns), modifier = Modifier.weight(1f).testTag("personal_library_all"),
+            Text("$title · ${ordered.size}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
+            LazyVerticalGrid(GridCells.Fixed(columns), state = gridState, modifier = Modifier.weight(1f).nestedScroll(boundary).testTag("personal_library_all"),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(ordered, key = { it.id }) { item ->
                     PersonalLibraryCell(item, type != LibraryItemType.PLAYLIST || layout.playlistMode == "covers", columns,

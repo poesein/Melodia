@@ -20,6 +20,7 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 
+@OptIn(ExperimentalMaterial3Api::class)
 class PersonalLibraryUiTest {
     @get:Rule val compose = createComposeRule()
     @Composable private fun PageTheme(content: @Composable () -> Unit) {
@@ -35,17 +36,20 @@ class PersonalLibraryUiTest {
             instrumentation.uiAutomation.takeScreenshot().compress(Bitmap.CompressFormat.PNG, 100, it)
         }
     }
-    @Test fun toolbarInvokesTheFiveExistingActionsAndDoesNotAddAnAvatarOrLibraryHeading() {
+    @Test fun toolbarRestoresAvatarAndTitleWithAllFourActionsAlignedOnTheRight() {
         val clicked = mutableListOf<String>()
-        compose.setContent { PageTheme { PersonalLibraryToolbar({ clicked += "settings" }, { clicked += "local" },
+        compose.setContent { PageTheme { PersonalLibraryToolbar(null, { clicked += "avatar" }, { clicked += "local" },
             { clicked += "search" }, { clicked += "recognition" }, { clicked += "create" }) } }
-        listOf("个人音乐库样式设置", "本地音乐", "搜索音乐", "听歌识曲", "新建或导入歌单").forEach {
+        listOf("用户头像", "本地音乐", "搜索音乐", "听歌识曲", "新建或导入歌单").forEach {
             compose.onNodeWithContentDescription(it).performClick()
         }
-        compose.runOnIdle { assertEquals(listOf("settings", "local", "search", "recognition", "create"), clicked) }
+        compose.runOnIdle { assertEquals(listOf("avatar", "local", "search", "recognition", "create"), clicked) }
         assertTrue(compose.onNodeWithContentDescription("本地音乐").fetchSemanticsNode().boundsInRoot.left >=
             compose.onNodeWithContentDescription("新建或导入歌单").fetchSemanticsNode().boundsInRoot.right)
-        compose.onNodeWithText("音乐库").assertDoesNotExist()
+        compose.onNodeWithText("音乐库").assertIsDisplayed()
+        compose.onNodeWithContentDescription("个人音乐库样式设置").assertDoesNotExist()
+        assertTrue(compose.onNodeWithText("音乐库").fetchSemanticsNode().boundsInRoot.right <=
+            compose.onNodeWithContentDescription("搜索音乐").fetchSemanticsNode().boundsInRoot.left)
         compose.onNodeWithText("本地音乐详情").assertDoesNotExist()
     }
     @Test fun previewLimitsActualRowsToFiveInOneAndFiveColumnListModesAndOpensTheSelectedPlaylist() {

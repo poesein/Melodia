@@ -19,6 +19,7 @@ class LibraryPageLayoutPersistenceTest {
             repository.update(LibraryPage.LOCAL) { it.copy(sections = it.sections.map { section -> section.copy(visible = section.key != "local_playlists") }) }
             repository.update(LibraryPage.LOCAL) { it.copy(itemLimits = mapOf("albums" to 0), itemOrders = mapOf("local_playlists" to listOf("3", "1", "2"))) }
             repository.update(LibraryPage.PERSONAL) { it.copy(sections = it.sections.map { section -> if (section.key == "local_artists") section.copy(visible = true) else section }) }
+            repository.update(LibraryPage.PERSONAL) { it.copy(visiblePlaylistIds = setOf("-2", "playlist2", "temporarily_missing")) }
             scope.cancel(); scope.coroutineContext[Job]!!.join()
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             val restored = LibraryPageLayoutRepository(PreferenceDataStoreFactory.create(scope = scope, produceFile = { file }))
@@ -26,6 +27,7 @@ class LibraryPageLayoutPersistenceTest {
             assertEquals(2, restored.observe(LibraryPage.PERSONAL).first().playlistColumns)
             assertEquals(listOf("playlists", "albums", "artists"), restored.observe(LibraryPage.PERSONAL).first().sections.take(3).map { it.key })
             assertTrue(restored.observe(LibraryPage.PERSONAL).first().sections.first { it.key == "local_artists" }.visible)
+            assertEquals(setOf("-2", "playlist2", "temporarily_missing"), restored.observe(LibraryPage.PERSONAL).first().visiblePlaylistIds)
             assertFalse(restored.observe(LibraryPage.LOCAL).first().sections.first { it.key == "local_playlists" }.visible)
             assertEquals(0, restored.observe(LibraryPage.LOCAL).first().itemLimit("albums"))
             assertEquals(listOf("3", "1", "2"), restored.observe(LibraryPage.LOCAL).first().itemOrders["local_playlists"])

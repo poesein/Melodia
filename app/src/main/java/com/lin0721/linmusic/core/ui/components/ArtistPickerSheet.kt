@@ -1,5 +1,7 @@
 package com.lin0721.linmusic.core.ui.components
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.lin0721.linmusic.core.ui.scroll.rememberExpandedSheetScrollBoundary
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -36,6 +38,8 @@ fun ArtistPickerSheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
+    val boundary = rememberExpandedSheetScrollBoundary(sheetState) { scrollState.canScrollForward }
     val scope = rememberCoroutineScope()
 
     ModalBottomSheet(
@@ -48,7 +52,7 @@ fun ArtistPickerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .nestedScroll(boundary).verticalScroll(scrollState)
                 .navigationBarsPadding()
                 .padding(bottom = MelodiaSpacing.md)
         ) {

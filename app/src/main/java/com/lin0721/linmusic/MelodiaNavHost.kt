@@ -193,6 +193,7 @@ fun MelodiaNavHost(
                     onAlbumClick = { onNavigateToPlaylist(it, true) },
                     onLocalMusic = onNavigateToLocalMusic,
                     localNavigation = localMusicNavigation,
+                    onOpenSidebar = onOpenSidebar,
                     onSearch = onNavigateToSearch,
                     onRecognition = onOpenRecognition,
                     onLoginScreenVisibilityChanged = onLoginScreenVisibilityChanged
