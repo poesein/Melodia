@@ -117,7 +117,7 @@ fun ArtistMoreMenuSheet(
                     modifier = Modifier.size(24.dp))
                 Spacer(Modifier.width(MelodiaSpacing.md))
                 Column {
-                    Text("资料库设置", color = MaterialTheme.colorScheme.onSurface,
+                    Text("只显示录音室专辑", color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     val catalogSource = if (catalogUsesDefault) "跟随全局" else "此歌手单独设置"
                     Text("${if (catalogEnabled) "已开启" else "已关闭"} · $catalogSource",

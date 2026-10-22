@@ -12,6 +12,9 @@ class OfflineFallback(
     private val cache: MetadataCache,
     private val onlineState: OnlineStateProvider
 ) {
+    // Explicit metadata reuse for bounded batch readers. Normal online reads stay unchanged.
+    suspend fun <T> readCached(key: String, serializer: KSerializer<T>): T? = cache.read(key, serializer)
+
     fun <T> cached(key: String, serializer: KSerializer<T>, source: () -> Flow<Result<T>>): Flow<Result<T>> = flow {
         if (onlineState.isOnline()) {
             source().collect { result ->

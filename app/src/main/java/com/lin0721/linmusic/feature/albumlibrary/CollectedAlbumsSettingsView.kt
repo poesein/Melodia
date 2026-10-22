@@ -26,6 +26,9 @@ fun CollectedAlbumsSettingsView(viewModel: CollectedAlbumsLayoutViewModel = koin
         if (state.loaded) {
             item { SettingsGroupCard("封面与浏览") {
                 SettingsRow("每行专辑数", "${state.layout.columns} 列", { choosingColumns = true })
+                SettingsSwitchRow("仅显示专辑封面", "隐藏专辑名称和歌手", state.layout.coversOnly) { enabled ->
+                    viewModel.save { it.copy(coversOnly = enabled) }
+                }
                 SettingsSwitchRow("按歌手分组", "同一张合辑保持完整", state.layout.groupByArtist) { enabled ->
                     viewModel.save { it.copy(groupByArtist = enabled) }
                 }

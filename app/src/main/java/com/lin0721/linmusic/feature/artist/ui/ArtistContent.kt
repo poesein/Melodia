@@ -118,7 +118,6 @@ fun ArtistContent(
     var showMoreMenuSheet by remember { mutableStateOf(false) }
     var showCatalogSheet by remember { mutableStateOf(false) }
     var showCorrectionsSheet by remember(artist.id) { mutableStateOf(false) }
-    var albumSortOrder by rememberSaveable(artist.id) { mutableStateOf(ArtistAlbumSortOrder.DEFAULT) }
     val catalogSelection = remember(albums, catalogState.enabled, catalogState.groups, catalogState.artistMbid) {
         catalogState.groups?.takeIf { catalogState.enabled }?.let {
             ArtistCatalogMatcher.select(albums, it, boundArtistMbid = catalogState.artistMbid)
@@ -298,9 +297,7 @@ fun ArtistContent(
                         loadingMore = albumsLoadingMore,
                         loadError = albumsLoadError,
                         onRetry = onRetryAlbums,
-                        onAlbumClick = onAlbumClick,
-                        sortOrder = albumSortOrder,
-                        onSortOrderChanged = { albumSortOrder = it }
+                        onAlbumClick = onAlbumClick
                     )
                     2 -> artistAboutTab(
                         artist = artist,

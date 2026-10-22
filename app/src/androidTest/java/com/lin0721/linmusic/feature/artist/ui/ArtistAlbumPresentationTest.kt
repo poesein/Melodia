@@ -38,6 +38,7 @@ class ArtistAlbumPresentationTest {
         }
         compose.onNodeWithText("匹配1·未识别2·合并1·排除1").assertIsDisplayed()
         compose.onNodeWithText("Studio Album").assertIsDisplayed()
+        compose.onNodeWithText("默认顺序").assertDoesNotExist()
         compose.onNodeWithText("主要录音室专辑 · MusicBrainz").assertDoesNotExist()
         compose.onNodeWithText("资料库歌手：Example Artist").assertDoesNotExist()
         compose.onNodeWithText("已读取完整网易云专辑列表", substring = true).assertDoesNotExist()
@@ -59,7 +60,7 @@ class ArtistAlbumPresentationTest {
             }
         }
         compose.onNodeWithText("专辑最少曲数").assertDoesNotExist()
-        compose.onNodeWithText("资料库设置").performClick()
+        compose.onNodeWithText("只显示录音室专辑").performClick()
         compose.onNodeWithText("手动修正").assertDoesNotExist()
         compose.onNodeWithText("恢复全部").assertDoesNotExist()
         compose.runOnIdle {

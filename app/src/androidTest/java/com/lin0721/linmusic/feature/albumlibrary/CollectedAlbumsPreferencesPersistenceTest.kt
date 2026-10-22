@@ -16,16 +16,16 @@ class CollectedAlbumsPreferencesPersistenceTest {
         try {
             val original = CollectedAlbumsPreferences(PreferenceDataStoreFactory.create(scope = scope, produceFile = { file }))
             assertEquals(AlbumPageLayout(), original.layout.first())
-            original.update { it.copy(columns = 5, groupByArtist = true, sort = AlbumPageSort.NAME) }
+            original.update { it.copy(columns = 5, groupByArtist = true, sort = AlbumPageSort.NAME, coversOnly = true) }
             scope.cancel(); scope.coroutineContext[Job]!!.join()
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             val restored = CollectedAlbumsPreferences(PreferenceDataStoreFactory.create(scope = scope, produceFile = { file }))
-            assertEquals(AlbumPageLayout(columns = 5, groupByArtist = true, sort = AlbumPageSort.NAME), restored.layout.first())
+            assertEquals(AlbumPageLayout(columns = 5, groupByArtist = true, sort = AlbumPageSort.NAME, coversOnly = true), restored.layout.first())
             restored.update { it.copy(columns = 1) }
             scope.cancel(); scope.coroutineContext[Job]!!.join()
             scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             val restoredAgain = CollectedAlbumsPreferences(PreferenceDataStoreFactory.create(scope = scope, produceFile = { file }))
-            assertEquals(AlbumPageLayout(columns = 1, groupByArtist = true, sort = AlbumPageSort.NAME), restoredAgain.layout.first())
+            assertEquals(AlbumPageLayout(columns = 1, groupByArtist = true, sort = AlbumPageSort.NAME, coversOnly = true), restoredAgain.layout.first())
         } finally {
             scope.cancel(); scope.coroutineContext[Job]!!.join(); file.delete()
         }

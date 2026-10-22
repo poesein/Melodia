@@ -117,4 +117,19 @@ class CollectedAlbumsUiTest {
         compose.onNodeWithContentDescription("全部播放专辑").assertIsNotEnabled()
         compose.onNodeWithContentDescription("随机播放专辑（专辑内顺序）").assertIsNotEnabled()
     }
+    @Test fun coversOnlyHidesAllVisibleNamesAndGroupHeadingsWhileCoversRemainAccessibleAndClickable() {
+        var opened: Long? = null
+        var coversOnly by mutableStateOf(true)
+        compose.setContent { MaterialTheme {
+            CollectedAlbumsPage(state(listOf(album(1, "Cover Only Record", "Muse"))),
+                AlbumPageLayout(groupByArtist = true, coversOnly = coversOnly), { opened = it }, { _, _ -> }, {}, {}, {})
+        } }
+        compose.onNodeWithText("Cover Only Record").assertDoesNotExist()
+        compose.onNodeWithText("Muse · 1").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Cover Only Record · 专辑 · Muse").performClick()
+        compose.runOnIdle { assertEquals(1L, opened); coversOnly = false }
+        compose.onNodeWithText("Cover Only Record").assertExists()
+        compose.onNodeWithText("Muse · 1").assertExists()
+    }
+
 }

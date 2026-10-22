@@ -48,6 +48,7 @@ import com.lin0721.linmusic.feature.personallibrary.CreatedPlaylistVisibility
 import com.lin0721.linmusic.core.log.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.SupervisorJob
 import org.koin.dsl.onClose
 
@@ -100,7 +101,19 @@ val viewModelModule = module {
     single { com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsPreferences(androidContext()) }
     single { com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsRepository(get(), get()) }
     viewModelOf(::CollectedAlbumsLayoutViewModel)
-    viewModelOf(::CollectedAlbumsViewModel)
+    single { com.lin0721.linmusic.feature.albumlibrary.CollectedAlbumsPlayer(
+        get(), get(), CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+        com.lin0721.linmusic.core.ui.components.ToastManager::showToast) }
+    viewModel {
+        val associations = get<com.lin0721.linmusic.feature.localmusic.data.LocalAlbumAssociationStore>()
+        val filter = get<com.lin0721.linmusic.core.contentfilter.ContentFilter>()
+        CollectedAlbumsViewModel(get(), get(), get(), get(), get(), cachedLocalAlbum = { id ->
+            com.lin0721.linmusic.feature.albumlibrary.associatedAlbumMetadata(id,
+                associations.associations.first().values)?.let { detail ->
+                detail.copy(tracks = filter.filterBlockedArtists(detail.tracks) { it.ar.map { artist -> artist.id } })
+            }
+        })
+    }
     single { com.lin0721.linmusic.feature.playlist.ui.PlaylistTrackSortRepository(androidContext()) } onClose { it?.close() }
     viewModelOf(::PlaylistTrackSortViewModel)
     viewModelOf(::PlaylistTextImportViewModel)

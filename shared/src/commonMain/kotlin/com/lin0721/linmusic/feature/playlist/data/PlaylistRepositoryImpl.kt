@@ -65,6 +65,12 @@ class PlaylistRepositoryImpl(
         emit(Result.success(all))
     }
 
+    override suspend fun peekAlbumDetail(id: Long): PlaylistDetail? {
+        val cached = offline.readCached("album_detail_$id", PlaylistDetail.serializer()) ?: return null
+        if (cached.id != id) return null
+        return cached.copy(tracks = contentFilter.filterBlockedArtists(cached.tracks) { it.ar.map { artist -> artist.id } })
+    }
+
     override fun getAlbumDetail(id: Long): Flow<Result<PlaylistDetail>> =
         offline.cached("album_detail_$id") {
             apiFlow(

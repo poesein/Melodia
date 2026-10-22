@@ -11,70 +11,19 @@ import org.junit.Test
 import kotlin.random.Random
 
 class CollectedAlbumsPlaybackTest {
-    @Test fun unavailableAlbumsCanBeReportedAndSkippedWithoutBreakingTheOtherAlbumBlocks() = runTest {
-        val skipped = mutableListOf<Long>()
-        val queue = CollectedAlbumsPlayback.prepare((1L..3L).map { AlbumSubItem(it) }, false,
-            { if (it.id == 2L) error("unavailable") else tracks(it.id) }, onSkipped = { skipped += it.id })
-        assertEquals(listOf(11L, 12L, 31L, 32L), queue.map { it.songId })
-        assertEquals(listOf(2L), skipped)
-        assertTrue(runCatching { CollectedAlbumsPlayback.prepare(listOf(AlbumSubItem(2)), false,
-            { error("unavailable") }, onSkipped = {}) }.isFailure)
-    }
-    private val albums = (1L..7L).map { AlbumSubItem(it, "Album $it") }
-    private fun tracks(id: Long) = listOf(Track(id * 10 + 1), Track(id * 10 + 2))
-
-    @Test fun sequentialPlaybackPreservesBothAlbumAndTrackOrderDespiteReverseCompletion() = runTest {
-        val queue = CollectedAlbumsPlayback.prepare(albums, false, { album ->
-            delay((8 - album.id) * 10); tracks(album.id)
-        })
-        assertEquals(albums.flatMap { tracks(it.id) }.map { it.id }, queue.map { it.songId })
+    @Test fun randomPlaybackPermutesEachAlbumOnceAndSequentialOrderUsesTheGivenSnapshot() {
+        val albums = (1L..20L).map { AlbumSubItem(it) }
+        assertEquals(albums, CollectedAlbumsPlayback.orderedAlbums(albums, false))
+        val random = CollectedAlbumsPlayback.orderedAlbums(albums + albums.first(), true, Random(42))
+        assertEquals(albums.toSet(), random.toSet())
+        assertEquals(20, random.size)
+        assertNotEquals(albums, random)
     }
 
-    @Test fun randomPlaybackOnlyPermutesCompleteAlbumBlocks() = runTest {
-        val expected = CollectedAlbumsPlayback.orderedAlbums(albums, true, Random(42))
-        assertNotEquals(albums, expected)
-        val queue = CollectedAlbumsPlayback.prepare(albums, true, { tracks(it.id) }, Random(42))
-        assertEquals(expected.flatMap { tracks(it.id) }.map { it.id }, queue.map { it.songId })
-    }
-
-    @Test fun repeatedSongIdsInDifferentAlbumsRemainInBothAlbums() = runTest {
-        val queue = CollectedAlbumsPlayback.prepare(albums.take(2), false, {
-            if (it.id == 1L) listOf(Track(1), Track(9)) else listOf(Track(9), Track(3))
-        })
-        assertEquals(listOf(1L, 9L, 9L, 3L), queue.map { it.songId })
-    }
-
-    @Test fun albumRequestsNeverExceedThreeAndProgressReachesTheFullCollection() = runTest {
-        var active = 0; var maximum = 0
-        val progress = mutableListOf<Int>()
-        CollectedAlbumsPlayback.prepare(albums, false, {
-            active++; maximum = maxOf(maximum, active)
-            try { delay(100); tracks(it.id) } finally { active-- }
-        }, onPrepared = { count, total -> assertEquals(7, total); progress += count })
-        assertEquals(3, maximum)
-        assertEquals((1..7).toList(), progress)
-    }
-
-    @Test fun oneBrokenAlbumFailsTheWholePreparationAndCancelsItsSiblings() = runTest {
-        var cancelled = false
-        val result = runCatching {
-            CollectedAlbumsPlayback.prepare(albums.take(3), false, {
-                when (it.id) {
-                    1L -> tracks(it.id)
-                    2L -> { delay(10); error("broken album") }
-                    else -> try { awaitCancellation() } finally { cancelled = true }
-                }
-            })
-        }
-        assertEquals("broken album", result.exceptionOrNull()?.message)
-        assertTrue(cancelled)
-    }
-
-    @Test fun emptyOrInvalidAlbumsCannotProduceAPartialQueue() = runTest {
-        assertTrue(runCatching { CollectedAlbumsPlayback.prepare(emptyList(), false, { tracks(it.id) }) }.isFailure)
-        assertTrue(runCatching { CollectedAlbumsPlayback.prepare(listOf(AlbumSubItem(0)), false, { tracks(it.id) }) }.isFailure)
-        assertTrue(runCatching { CollectedAlbumsPlayback.prepare(albums.take(1), false, { emptyList() }) }.isFailure)
-        assertTrue(runCatching { CollectedAlbumsPlayback.prepare(albums.take(1), false, { listOf(Track(0)) }) }.isFailure)
+    @Test fun queueCreationKeepsRepeatedTracksAcrossAlbumsAndNeverRequestsPlaybackUrls() {
+        val album = AlbumSubItem(1, "Record", picUrl = "cover")
+        val tracks = listOf(Track(9), Track(9), Track(10))
+        assertEquals(listOf(9L, 9L, 10L), CollectedAlbumsPlayback.queueItems(album, tracks).map { it.songId })
     }
 
     @Test fun declaredTrackIdsRestoreOriginalOrderIncludingRepeatedSongsWithinAnAlbum() {

@@ -33,6 +33,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -402,6 +404,7 @@ fun LibraryItemRow(
 fun LibraryGridItem(
     item: LibraryItem,
     modifier: Modifier = Modifier,
+    showText: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {}
 ) {
@@ -410,6 +413,9 @@ fun LibraryGridItem(
 
     Column(
         modifier = modifier
+            .semantics {
+                if (!showText) contentDescription = "${item.title} · ${item.subtitle}"
+            }
             .pressScale(MelodiaPress.Card, interactionSource)
             .combinedClickable(
                 interactionSource = interactionSource,
@@ -462,7 +468,7 @@ fun LibraryGridItem(
         } else {
             SubcomposeAsyncImage(
                 model = "${item.coverUrl}?param=300y300",
-                contentDescription = item.title,
+                contentDescription = if (showText) item.title else null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
@@ -472,37 +478,39 @@ fun LibraryGridItem(
                 error = { CoverPlaceholder() }
             )
         }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = item.title,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (item.isPinned) {
-                Icon(
-                    imageVector = Icons.Default.PushPin,
-                    contentDescription = "已置顶",
-                    tint = DownloadedGreen,
-                    modifier = Modifier
-                        .size(11.dp)
-                        .padding(end = MelodiaSpacing.xxs)
+        if (showText) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = item.title,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (item.isPinned) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = "已置顶",
+                        tint = DownloadedGreen,
+                        modifier = Modifier
+                            .size(11.dp)
+                            .padding(end = MelodiaSpacing.xxs)
+                    )
+                }
+                Text(
+                    text = item.subtitle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            Text(
-                text = item.subtitle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }

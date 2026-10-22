@@ -120,9 +120,9 @@ internal fun CollectedAlbumsPage(
                 placeholder = { Text("搜索专辑或歌手") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 trailingIcon = { MelodiaIconButton(onClick = { query = ""; searching = false }) { Icon(Icons.Rounded.Close, "关闭专辑搜索") } })
             if (state.preparing) {
-                LinearProgressIndicator(progress = { if (state.totalAlbums > 0) state.preparedAlbums.toFloat() / state.totalAlbums else 0f }, modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("正在准备专辑 ${state.preparedAlbums}/${state.totalAlbums}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Text("正在打开第一张专辑…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     TextButton(onClick = onCancelPreparation) { Text("取消") }
                 }
             }
@@ -148,14 +148,14 @@ internal fun CollectedAlbumsPage(
                         if (shown.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "empty") {
                             Text(if (query.isBlank()) "还没有收藏专辑" else "没有找到匹配的专辑", Modifier.padding(vertical = 40.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        else if (layout.groupByArtist) {
+                        else if (layout.groupByArtist && !layout.coversOnly) {
                             shown.groupBy { it.artistLabel() }.forEach { (artist, albums) ->
                                 item(span = { GridItemSpan(maxLineSpan) }, key = "artist:$artist") {
                                     Text("$artist · ${albums.size}", modifier = Modifier.padding(top = 8.dp), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                items(albums, key = { "album:${it.id}" }) { album -> LibraryGridItem(album.libraryItem(), onClick = { onAlbumClick(album.id) }) }
+                                items(albums, key = { "album:${it.id}" }) { album -> LibraryGridItem(album.libraryItem(), showText = !layout.coversOnly, onClick = { onAlbumClick(album.id) }) }
                             }
-                        } else items(shown, key = { "album:${it.id}" }) { album -> LibraryGridItem(album.libraryItem(), onClick = { onAlbumClick(album.id) }) }
+                        } else items(shown, key = { "album:${it.id}" }) { album -> LibraryGridItem(album.libraryItem(), showText = !layout.coversOnly, onClick = { onAlbumClick(album.id) }) }
                     }
                 }
             }

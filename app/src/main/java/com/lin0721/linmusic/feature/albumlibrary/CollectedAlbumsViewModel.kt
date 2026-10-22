@@ -48,7 +48,9 @@ class CollectedAlbumsViewModel(
     private val repository: CollectedAlbumsRepository,
     private val playlistRepository: PlaylistRepository,
     private val playbackController: PlaybackController,
-    private val userPreferences: UserPreferences
+    private val userPreferences: UserPreferences,
+    private val albumPlayer: CollectedAlbumsPlayer,
+    private val cachedLocalAlbum: suspend (Long) -> com.lin0721.linmusic.core.model.PlaylistDetail? = { null }
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(CollectedAlbumsState())
     val state: StateFlow<CollectedAlbumsState> = mutableState.asStateFlow()
@@ -62,19 +64,24 @@ class CollectedAlbumsViewModel(
     private var playbackJob: Job? = null
     private var releaseDatesJob: Job? = null
     private val releaseTimes = mutableMapOf<Long, Long>()
+    private fun newReader() = CollectedAlbumReader(
+        fetch = { playlistRepository.getAlbumDetail(it).first().getOrThrow() },
+        peek = { playlistRepository.peekAlbumDetail(it) ?: cachedLocalAlbum(it) })
+    private var albumReader = newReader()
 
     fun ensureReleaseDates() {
         if (releaseDatesJob?.isActive == true || state.value.loading) return
-        val selected = state.value.albums.filter { it.publishTime <= 0L && it.id !in releaseTimes }
+        val selected = state.value.albums.filter { it.publishTime == 0L && it.id !in releaseTimes }
         if (selected.isEmpty()) return
         val context = accountGeneration
+        val reader = albumReader
         mutableState.update { it.copy(loadingReleaseDates = true) }
         releaseDatesJob = viewModelScope.launch {
             try {
                 val limits = Semaphore(3)
                 val dates = coroutineScope { selected.map { album -> async {
                     limits.withPermit {
-                        val time = try { withTimeout(15_000) { playlistRepository.getAlbumDetail(album.id).first().getOrThrow().publishTime } }
+                        val time = try { reader.read(album.id, requireDate = true).publishTime }
                         catch (cancelled: TimeoutCancellationException) { 0L }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { 0L }
@@ -84,9 +91,9 @@ class CollectedAlbumsViewModel(
                 if (context == accountGeneration) {
                     releaseTimes.putAll(dates)
                     mutableState.update { current -> current.copy(albums = current.albums.map { album ->
-                        album.copy(publishTime = dates[album.id]?.takeIf { it > 0L } ?: album.publishTime)
+                        album.copy(publishTime = dates[album.id]?.takeIf { it != 0L } ?: album.publishTime)
                     }) }
-                    if (dates.values.any { it <= 0L }) mutableEvents.tryEmit("部分专辑发行时间未能取得，已排在末尾；刷新后可重试")
+                    if (dates.values.any { it == 0L }) mutableEvents.tryEmit("部分专辑发行时间未能取得，已排在末尾；刷新后可重试")
                 }
             } finally {
                 if (context == accountGeneration) mutableState.update { it.copy(loadingReleaseDates = false) }
@@ -104,6 +111,7 @@ class CollectedAlbumsViewModel(
                     listJob?.cancel()
                     releaseDatesJob?.cancel()
                     releaseTimes.clear()
+                    albumReader = newReader()
                     cancelPlaybackPreparation()
                     uid = account
                     mutableState.value = CollectedAlbumsState(loading = account != null, loggedIn = account != null)
@@ -114,7 +122,7 @@ class CollectedAlbumsViewModel(
 
     fun refresh() {
         val account = uid ?: return
-        releaseTimes.entries.removeAll { it.value <= 0L }
+        releaseTimes.entries.removeAll { it.value == 0L }
         load(account)
     }
 
@@ -131,7 +139,7 @@ class CollectedAlbumsViewModel(
                     if (generation != listGeneration) return@collect
                     result.fold(onSuccess = { albums ->
                         mutableState.update { it.copy(albums = albums.map { album -> album.copy(
-                            publishTime = releaseTimes[album.id]?.takeIf { time -> time > 0L } ?: album.publishTime)
+                            publishTime = releaseTimes[album.id]?.takeIf { time -> time != 0L } ?: album.publishTime)
                         }, loading = false, error = null) }
                     }, onFailure = { error ->
                         mutableState.update { it.copy(loading = false, error = message(error)) }
@@ -151,29 +159,22 @@ class CollectedAlbumsViewModel(
         val selected = albums.toList().distinctBy { it.id }
         if (selected.isEmpty()) { mutableEvents.tryEmit("当前没有可播放的专辑"); return }
         cancelPlaybackPreparation()
+        albumReader = albumReader.fork()
         val generation = playbackGeneration
         val context = accountGeneration
+        val reader = albumReader
         mutableState.update { it.copy(preparing = true, preparedAlbums = 0, totalAlbums = selected.size) }
         playbackJob = viewModelScope.launch {
             try {
                 requireAccount(account, context)
-                val skipped = mutableListOf<AlbumSubItem>()
-                val queue = CollectedAlbumsPlayback.prepare(selected, shuffleAlbums,
-                    loadAlbum = { CollectedAlbumsPlayback.loadTracks(it, playlistRepository) },
-                    onPrepared = { count, total ->
-                        if (generation == playbackGeneration && context == accountGeneration) {
-                            mutableState.update { it.copy(preparedAlbums = count, totalAlbums = total) }
-                        }
-                    }, onSkipped = { skipped += it })
-                withTimeout(15_000) { playbackController.initController() }
-                requireAccount(account, context)
-                if (generation != playbackGeneration) return@launch
-                // Commit once, through the existing resolver (local links/cache/strict source mode).
-                // Switching the engine's song shuffle off is essential for intact album blocks.
-                CollectedAlbumsPlayback.useAlbumOrder(playbackController)
-                val source = selected.singleOrNull()?.let { PlaySource(PlaySource.Kind.ALBUM, it.id, it.name, it.picUrl) }
-                playbackController.playQueue(queue, 0, playContext = "收藏专辑", source = source)
-                if (skipped.isNotEmpty()) mutableEvents.tryEmit("已播放可读取的专辑；跳过 ${skipped.size} 张：${skipped.take(3).joinToString { it.name }}")
+                albumPlayer.start(selected, shuffleAlbums, account) { album ->
+                    requireAccount(account, context)
+                    try {
+                        val tracks = CollectedAlbumsPlayback.loadTracks(album, playlistRepository, reader.read(album.id))
+                        CollectedAlbumsPlayback.queueItems(album, tracks)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { throw CollectedAlbumReadFailure(album.name, error) }
+                }
             } catch (_: TimeoutCancellationException) {
                 if (generation == playbackGeneration && context == accountGeneration) mutableEvents.tryEmit("读取专辑或连接播放器超时，请重试")
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -203,6 +204,7 @@ class CollectedAlbumsViewModel(
     }
 
     private fun message(error: Throwable): String = when (error) {
+        is CollectedAlbumReadFailure -> "《${error.albumName}》读取失败，再次点击播放可重试"
         AppError.Unauthorized -> "登录状态已失效，请重新登录"
         AppError.NetworkError -> "无法连接网络，请重试"
         AppError.RiskControl -> "请求暂时受限，请稍后重试"

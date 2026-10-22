@@ -16,6 +16,14 @@ import java.io.File
 import java.nio.file.Files
 
 class OfflineFallbackTest {
+    @Test fun `explicit cache lookup reuses metadata online without changing normal reads`() = runBlocking {
+        val online = FakeOnlineState(true)
+        val fallback = fallback(online)
+        fallback.cached("album") { flow { emit(Result.success(listOf("tracks"))) } }.first()
+        assertEquals(listOf("tracks"), fallback.readCached("album", ListSerializer(String.serializer())))
+        uid = 2L
+        assertNull(fallback.readCached("album", ListSerializer(String.serializer())))
+    }
 
     private lateinit var dir: File
     private var uid = 1L

@@ -19,6 +19,9 @@ interface PlaylistRepository {
     // 获取专辑详情，映射至统一领域模型 PlaylistDetail
     fun getAlbumDetail(id: Long): Flow<Result<PlaylistDetail>>
 
+    // Batch playback can reuse details already loaded by an individual album page.
+    suspend fun peekAlbumDetail(id: Long): PlaylistDetail? = null
+
     // 收藏/取消收藏歌单
     fun subscribePlaylist(playlistId: Long, subscribe: Boolean): Flow<Result<Unit>>
 

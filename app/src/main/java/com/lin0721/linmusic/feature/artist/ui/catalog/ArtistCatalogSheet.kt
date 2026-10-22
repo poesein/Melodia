@@ -71,7 +71,7 @@ fun ArtistCatalogSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("主要录音室专辑", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("只显示录音室专辑", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(if (state.enabledOverride == null) "$artistName · 跟随全局（${if (state.defaultEnabled) "开启" else "关闭"}）"
                         else "$artistName · 此歌手单独设置", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -95,8 +95,8 @@ fun ArtistCatalogSheet(
             } else {
                 ArtistCatalogStatus(state, selection)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (state.artistMbid != null) TextButton(onClick = onChangeBinding, enabled = !state.saving) { Text("手动修正") }
                     TextButton(onClick = onRetry, enabled = !state.loading && !state.saving) { Text("重试资料库") }
-                    if (state.artistMbid != null) TextButton(onClick = onChangeBinding, enabled = !state.saving) { Text("手动修正资料库歌手") }
                     TextButton(onClick = onRestoreAll, enabled = !state.saving) { Text("恢复全部专辑") }
                 }
                 if (state.choosingArtist || state.artistMbid == null) {

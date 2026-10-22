@@ -30,7 +30,8 @@ enum class AlbumPageSort(val label: String) {
 data class AlbumPageLayout(
     val columns: Int = 3,
     val groupByArtist: Boolean = false,
-    val sort: AlbumPageSort = AlbumPageSort.RECENTLY_COLLECTED
+    val sort: AlbumPageSort = AlbumPageSort.RECENTLY_COLLECTED,
+    val coversOnly: Boolean = false
 ) {
     fun normalized() = copy(columns = columns.coerceIn(1, 5))
 }
@@ -41,10 +42,12 @@ class CollectedAlbumsPreferences internal constructor(private val store: DataSto
     private val columns = intPreferencesKey("columns")
     private val grouping = booleanPreferencesKey("group_by_artist")
     private val sort = stringPreferencesKey("sort")
+    private val coversOnly = booleanPreferencesKey("covers_only")
     private fun decode(p: Preferences) = AlbumPageLayout(
         p[columns] ?: 3,
         p[grouping] ?: false,
-        AlbumPageSort.entries.firstOrNull { it.name == p[sort] } ?: AlbumPageSort.RECENTLY_COLLECTED
+        AlbumPageSort.entries.firstOrNull { it.name == p[sort] } ?: AlbumPageSort.RECENTLY_COLLECTED,
+        p[coversOnly] ?: false
     ).normalized()
     val layout = store.data.map(::decode).distinctUntilChanged()
     suspend fun update(change: (AlbumPageLayout) -> AlbumPageLayout) {
@@ -53,6 +56,7 @@ class CollectedAlbumsPreferences internal constructor(private val store: DataSto
             prefs[columns] = value.columns
             prefs[grouping] = value.groupByArtist
             prefs[sort] = value.sort.name
+            prefs[coversOnly] = value.coversOnly
         }
     }
 }

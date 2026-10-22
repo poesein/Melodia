@@ -18,7 +18,7 @@ fun ArtistAlbumsSettingsView(viewModel: SettingsViewModel) {
             SettingsGroupCard("主要录音室专辑") {
                 SettingsSwitchRow(
                     title = "默认启用资料库筛选",
-                    subtitle = "歌手页的资料库设置内可手动修正或恢复全部；已保存的修正会保留",
+                    subtitle = "歌手页的“只显示录音室专辑”内可手动修正或恢复全部；已保存的修正会保留",
                     checked = enabled,
                     onCheckedChange = viewModel::updateArtistCatalogDefaultEnabled
                 )
