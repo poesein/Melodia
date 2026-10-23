@@ -56,7 +56,9 @@ data class TrackSelectionUi(
     val active: Boolean = false,
     val selectedIds: Set<Long> = emptySet(),
     val onEnter: (Long) -> Unit = {},
-    val onToggle: (Long) -> Unit = {}
+    val onToggle: (Long) -> Unit = {},
+    val busy: Boolean = false,
+    val progressText: String? = null
 )
 
 @Immutable
@@ -82,7 +84,9 @@ fun SelectionHeader(
     containerColor: Color,
     onToggleAll: () -> Unit,
     onExit: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    busy: Boolean = false,
+    progressText: String? = null
 ) {
     Box(
         modifier = modifier
@@ -95,10 +99,10 @@ fun SelectionHeader(
             onClick = onExit,
             modifier = Modifier.align(Alignment.CenterStart).padding(start = MelodiaSpacing.xs)
         ) {
-            Icon(Icons.Rounded.Close, contentDescription = "退出多选", tint = MaterialTheme.colorScheme.onSurface)
+            Icon(Icons.Rounded.Close, contentDescription = if (busy) "停止批量操作" else "退出多选", tint = MaterialTheme.colorScheme.onSurface)
         }
         Text(
-            text = "已选 $count 首",
+            text = progressText ?: "已选 $count 首",
             color = MaterialTheme.colorScheme.onSurface,
             fontSize = 17.sp,
             fontWeight = FontWeight.Bold,
@@ -106,6 +110,7 @@ fun SelectionHeader(
         )
         MelodiaTextButton(
             onClick = onToggleAll,
+            enabled = !busy,
             modifier = Modifier.align(Alignment.CenterEnd).padding(end = MelodiaSpacing.xs)
         ) {
             Text(if (allSelected) "取消全选" else "全选", color = MaterialTheme.colorScheme.primary, fontSize = 15.sp)
@@ -211,7 +216,9 @@ fun BoxScope.TrackSelectionOverlay(
             allSelected = allSelected,
             containerColor = headerColor,
             onToggleAll = { onToggleSelectAll(visibleIds) },
-            onExit = onExit
+            onExit = onExit,
+            busy = selectionUi.busy,
+            progressText = selectionUi.progressText
         )
     }
     AnimatedVisibility(
@@ -223,6 +230,6 @@ fun BoxScope.TrackSelectionOverlay(
             .zIndex(SELECTION_Z_INDEX)
             .padding(bottom = LocalBottomOverlayInset.current)
     ) {
-        SelectionActionBar(actions = actions, enabled = hasSelection)
+        SelectionActionBar(actions = actions, enabled = hasSelection && !selectionUi.busy)
     }
 }

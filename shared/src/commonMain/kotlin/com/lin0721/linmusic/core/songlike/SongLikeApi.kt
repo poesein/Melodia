@@ -29,7 +29,8 @@ data class LikeSongRequest(
 @Serializable
 data class LikeSongResponse(
     val code: Int = 0,
-    val playlistId: Long = 0
+    val playlistId: Long = 0,
+    val message: String? = null
 ) {
     val isSuccess: Boolean get() = code == 200
 }

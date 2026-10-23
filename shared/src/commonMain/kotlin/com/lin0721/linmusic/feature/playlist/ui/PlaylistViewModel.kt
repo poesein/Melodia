@@ -8,6 +8,8 @@ import com.lin0721.linmusic.core.download.DownloadTrackInfo
 import com.lin0721.linmusic.core.download.SongDownloader
 import com.lin0721.linmusic.core.download.toToastMessage
 import com.lin0721.linmusic.core.download.yearFromEpochMillis
+import com.lin0721.linmusic.core.model.isLikedSongsPlaylist
+import com.lin0721.linmusic.core.model.isOwnLikedSongs
 import com.lin0721.linmusic.core.model.PlaylistDetail
 import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.core.offline.OfflinePlayability
@@ -87,6 +89,12 @@ class PlaylistViewModel(
     private var loadJob: Job? = null
     // 起播/下载前补全全部曲目的任务，切换歌单时需一并取消，避免补全完成后误播上一个歌单
     private var fullTrackJob: Job? = null
+    private val removedTrackIds = mutableMapOf<Long, MutableSet<Long>>()
+    private var stopBatch = false
+    private val _batchProgress = MutableStateFlow(TrackBatchProgress())
+    val batchProgress = _batchProgress.asStateFlow()
+    private val _pendingLikeIds = MutableStateFlow<Set<Long>>(emptySet())
+    val pendingLikeIds = _pendingLikeIds.asStateFlow()
 
     private val _uiState = MutableStateFlow<PlaylistUiState>(PlaylistUiState.Loading)
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
@@ -172,7 +180,7 @@ class PlaylistViewModel(
     }
 
     fun loadPlaylist(id: Long, isAlbum: Boolean = false) {
-        if (requestedPlaylistId != id) _selection.value = TrackSelection()
+        if (requestedPlaylistId != id) { _selection.value = TrackSelection(); stopBatch = true }
         requestedPlaylistId = id
         isAlbumMode = isAlbum
         _uiState.value = PlaylistUiState.Loading
@@ -224,7 +232,8 @@ class PlaylistViewModel(
             val flow = if (isAlbum) playlistRepository.getAlbumDetail(id) else playlistRepository.getPlaylistDetail(id)
             flow.collect { result ->
                 result.fold(
-                    onSuccess = { detail ->
+                    onSuccess = { incoming ->
+                        val detail = withoutRemoved(incoming)
                         _uiState.value = PlaylistUiState.Success(
                             detail,
                             isSubscribed = detail.subscribed,
@@ -495,15 +504,10 @@ class PlaylistViewModel(
                 likedSongIds = songLikeRepository.likedSongIds.value,
                 onToast = { _toastEvent.emit(it) },
                 onLikedChanged = { newLiked ->
-                    songLikeRepository.syncLikedSongIds(newLiked)
+                    if (songId !in newLiked) viewModelScope.launch { removeFromCurrentLiked(songId) }
+                    else removedTrackIds.values.forEach { it.remove(songId) }
                 }
             )
-            // 停留在“我喜欢的音乐”歌单时需重新拉取列表，使被取消红心的歌曲从当前页消失
-            val successState = _uiState.value as? PlaylistUiState.Success
-            val profile = userPreferences.userProfile.first()
-            if (successState != null && profile != null && successState.playlist.id == profile.uid) {
-                loadPlaylist(successState.playlist.id, isAlbumMode)
-            }
         }
     }
 
@@ -629,10 +633,15 @@ class PlaylistViewModel(
 
     // 从当前歌单中删除一首歌，仅限歌单创建者可调用（由调用方按 UI 状态判断是否展示入口）
     fun removeTrackFromPlaylist(playlistId: Long, trackId: Long) {
+        val detail = (_uiState.value as? PlaylistUiState.Success)?.playlist ?: return
+        if (detail.id != playlistId || isAlbumMode) return
         viewModelScope.launch {
+            val profile = userPreferences.userProfile.first() ?: return@launch
+            if (detail.creator?.userId != profile.uid || detail.isOwnLikedSongs(profile.uid)) return@launch
             playlistRepository.manipulatePlaylistTracks("del", playlistId, listOf(trackId)).collect { result ->
                 result.onSuccess {
-                    _toastEvent.emit("已从歌单中删除")
+                    SongCollectDelegate.tracksChanged(playlistId, removed = setOf(trackId))
+                    _toastEvent.emit("已从歌单中移出")
                     dropTracksFromState(playlistId, setOf(trackId))
                 }.onFailure { e ->
                     _toastEvent.emit(e.toUserMessage(resourceProvider))
@@ -641,14 +650,31 @@ class PlaylistViewModel(
         }
     }
 
+    private fun withoutRemoved(detail: PlaylistDetail): PlaylistDetail {
+        val removed = removedTrackIds[detail.id].orEmpty()
+        val count = (detail.trackIds.map { it.id } + detail.tracks.map { it.id }).toSet().count { it in removed }
+        return detail.copy(tracks = detail.tracks.filter { it.id !in removed },
+            trackIds = detail.trackIds.filter { it.id !in removed },
+            trackCount = (detail.trackCount - count).coerceAtLeast(0))
+    }
+
     private fun dropTracksFromState(playlistId: Long, trackIds: Set<Long>) {
+        removedTrackIds.getOrPut(playlistId) { mutableSetOf() }.addAll(trackIds)
         _uiState.update { state ->
             if (state is PlaylistUiState.Success && state.playlist.id == playlistId) {
-                val updatedTracks = state.playlist.tracks.filter { it.id !in trackIds }
-                val updatedIds = state.playlist.trackIds.filter { it.id !in trackIds }
-                state.copy(playlist = state.playlist.copy(tracks = updatedTracks, trackIds = updatedIds))
+                val updated = withoutRemoved(state.playlist)
+                state.copy(playlist = updated, pendingTrackIds = state.pendingTrackIds.filter { it !in trackIds })
             } else state
         }
+        if ((_uiState.value as? PlaylistUiState.Success)?.playlist?.id == playlistId) {
+            _selection.update { it.copy(selectedIds = it.selectedIds - trackIds) }
+        }
+    }
+
+    private suspend fun removeFromCurrentLiked(songId: Long) {
+        val detail = (_uiState.value as? PlaylistUiState.Success)?.playlist ?: return
+        val uid = userPreferences.userProfile.first()?.uid ?: return
+        if (!isAlbumMode && detail.isOwnLikedSongs(uid)) dropTracksFromState(detail.id, setOf(songId))
     }
 
     // 拉取当前用户自建的歌单，供"添加到歌单"批量导入选择目标；排除当前歌单本身与"我喜欢的音乐"
@@ -661,18 +687,26 @@ class PlaylistViewModel(
     }
 
     fun enterSelection(firstTrackId: Long? = null) {
+        if (_batchProgress.value.active) return
         _selection.update { if (it.active) it else it.enter(firstTrackId) }
     }
 
     fun toggleSelected(trackId: Long) {
+        if (_batchProgress.value.active) return
         _selection.update { it.toggle(trackId) }
     }
 
     fun toggleSelectAll(visibleTrackIds: List<Long>) {
+        if (_batchProgress.value.active) return
         _selection.update { it.toggleAll(visibleTrackIds) }
     }
 
     fun exitSelection() {
+        if (_batchProgress.value.active) {
+            stopBatch = true
+            _batchProgress.update { it.copy(stopping = true) }
+            return
+        }
         _selection.value = TrackSelection()
     }
 
@@ -683,14 +717,22 @@ class PlaylistViewModel(
 
     // 批量操作成功后退出多选，失败保留已选便于重试；需要账号的操作先校验登录
     private fun runBatch(needLogin: Boolean = false, block: suspend (List<Track>) -> Boolean) {
-        val tracks = selectedTracks()
+        if (_batchProgress.value.active) return
+        val tracks = selectedTracks().distinctBy { it.id }
+        val page = requestedPlaylistId
         if (tracks.isEmpty()) return
+        stopBatch = false
+        _batchProgress.value = TrackBatchProgress(active = true, total = tracks.size)
         viewModelScope.launch {
-            if (needLogin && userPreferences.userProfile.first() == null) {
-                _toastEvent.emit("请先登录账号")
-                return@launch
-            }
-            if (block(tracks)) exitSelection()
+            try {
+                if (needLogin && userPreferences.userProfile.first() == null) {
+                    _toastEvent.emit("请先登录账号")
+                    return@launch
+                }
+                if (block(tracks) && requestedPlaylistId == page) _selection.value = TrackSelection()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { _toastEvent.emit(error.toUserMessage(resourceProvider)) }
+            finally { _batchProgress.value = TrackBatchProgress() }
         }
     }
 
@@ -706,8 +748,21 @@ class PlaylistViewModel(
         trackBatchActions.createPlaylistAndAdd(name, playlistPrivacyOf(isPrivate), tracks) { _toastEvent.emit(it) }
     }
 
-    fun batchLike() = runBatch(needLogin = true) { tracks ->
-        trackBatchActions.like(tracks) { _toastEvent.emit(it) } > 0
+    fun batchLike(like: Boolean = true) = runBatch(needLogin = true) { tracks ->
+        val detail = (_uiState.value as? PlaylistUiState.Success)?.playlist ?: return@runBatch false
+        val profile = userPreferences.userProfile.first() ?: return@runBatch false
+        val likedPage = !isAlbumMode && detail.isOwnLikedSongs(profile.uid)
+        _batchProgress.update { it.copy(label = if (like) "正在加入喜欢" else "正在取消喜欢") }
+        val result = trackBatchActions.setLiked(tracks, like, force = !like && likedPage,
+            onProgress = { done, total -> _batchProgress.update { it.copy(completed = done, total = total) } },
+            onApplied = { id ->
+                if (!like && likedPage) dropTracksFromState(detail.id, setOf(id))
+                if (like) removedTrackIds.values.forEach { it.remove(id) }
+            },
+            shouldStop = { stopBatch || requestedPlaylistId != detail.id },
+            onToast = { _toastEvent.emit(it) })
+        if (requestedPlaylistId == detail.id) _selection.update { it.copy(selectedIds = result.remainingIds) }
+        result.complete
     }
 
     fun batchDownload(level: String) = runBatch { tracks ->
@@ -717,7 +772,13 @@ class PlaylistViewModel(
 
     // 仅限歌单创建者可调用（由调用方按 UI 状态判断是否展示入口）
     fun batchRemove() = runBatch(needLogin = true) { tracks ->
-        val playlistId = (_uiState.value as? PlaylistUiState.Success)?.playlist?.id ?: return@runBatch false
+        val detail = (_uiState.value as? PlaylistUiState.Success)?.playlist ?: return@runBatch false
+        val profile = userPreferences.userProfile.first() ?: return@runBatch false
+        if (isAlbumMode || detail.creator?.userId != profile.uid || detail.isOwnLikedSongs(profile.uid)) {
+            _toastEvent.emit("只能从自己创建的普通歌单中移出歌曲")
+            return@runBatch false
+        }
+        val playlistId = detail.id
         val removed = trackBatchActions.removeFromPlaylist(playlistId, tracks) { _toastEvent.emit(it) }
         if (removed) dropTracksFromState(playlistId, tracks.map { it.id }.toSet())
         removed
@@ -914,25 +975,16 @@ class PlaylistViewModel(
     }
 
     fun toggleLikeSong(songId: Long, isLike: Boolean) {
+        if (songId in _pendingLikeIds.value) return
+        _pendingLikeIds.update { it + songId }
         viewModelScope.launch {
-            songLikeRepository.likeSong(songId, isLike).collect { result ->
-                result.fold(
-                    onSuccess = {
-                        _toastEvent.emit(if (isLike) "已添加到我喜欢的音乐" else "已从我喜欢的音乐中移除")
-
-                        val successState = _uiState.value as? PlaylistUiState.Success
-                        if (successState != null) {
-                            val profile = userPreferences.userProfile.first()
-                            if (profile != null && successState.playlist.id == profile.uid) {
-                                loadPlaylist(successState.playlist.id, isAlbumMode)
-                            }
-                        }
-                    },
-                    onFailure = { e ->
-                        _toastEvent.emit(e.toUserMessage(resourceProvider))
-                    }
-                )
-            }
+            try {
+                songLikeRepository.likeSong(songId, isLike).first().fold(onSuccess = {
+                    if (!isLike) removeFromCurrentLiked(songId)
+                    else removedTrackIds.values.forEach { it.remove(songId) }
+                    _toastEvent.emit(if (isLike) "已添加到我喜欢的音乐" else "已从我喜欢的音乐中移除")
+                }, onFailure = { _toastEvent.emit(it.toUserMessage(resourceProvider)) })
+            } finally { _pendingLikeIds.update { it - songId } }
         }
     }
 

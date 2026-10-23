@@ -112,7 +112,8 @@ val repositoryModule = module {
     singleOf(::CommentRepositoryImpl) { bind<CommentRepository>() }
 
     // 歌曲红心数据仓储（core/songlike 共享能力）
-    singleOf(::SongLikeRepositoryImpl) { bind<SongLikeRepository>() }
+    single { SongLikeRepositoryImpl(get(), get()) }
+    single<SongLikeRepository> { get<SongLikeRepositoryImpl>() }
 
     // 当前用户歌单列表仓储（core/userplaylist 共享能力）
     singleOf(::UserPlaylistRepositoryImpl) { bind<UserPlaylistRepository>() }

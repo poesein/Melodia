@@ -48,7 +48,8 @@ fun LazyListScope.playlistTrackItems(
     onMoreClick: (Track) -> Unit,
     trackPlayCounts: Map<Long, Int> = emptyMap(),
     unplayableIds: Set<Long> = emptySet(),
-    selectionUi: TrackSelectionUi = TrackSelectionUi()
+    selectionUi: TrackSelectionUi = TrackSelectionUi(),
+    pendingLikeIds: Set<Long> = emptySet()
 ) {
     items(tracks, key = { it.id }) { track ->
         val selecting = selectionUi.active
@@ -85,7 +86,8 @@ fun LazyListScope.playlistTrackItems(
                             onClick = {
                                 onToggleLike(track.id, false)
                             },
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(32.dp),
+                            enabled = track.id !in pendingLikeIds
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Favorite,

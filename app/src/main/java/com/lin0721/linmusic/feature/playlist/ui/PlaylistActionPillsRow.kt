@@ -44,9 +44,11 @@ fun PlaylistActionPillsRow(
     onEditOrderClick: () -> Unit,
     onSortClick: () -> Unit,
     onEditInfoClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isLikedSongsPlaylist: Boolean = false,
+    onEditSongsClick: () -> Unit = {}
 ) {
-    if (!isOwnedPlaylist) return
+    if (!isOwnedPlaylist && !isLikedSongsPlaylist) return
 
     val scrollState = rememberScrollState()
 
@@ -59,6 +61,8 @@ fun PlaylistActionPillsRow(
         horizontalArrangement = Arrangement.spacedBy(MelodiaSpacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        ActionPill(icon = Icons.Rounded.Edit, label = "编辑歌曲", enabled = !isTracksEmpty, onClick = onEditSongsClick)
+        if (isOwnedPlaylist) {
         // 1. 添加音乐
         ActionPill(
             icon = Icons.Rounded.Add,
@@ -70,11 +74,12 @@ fun PlaylistActionPillsRow(
         // 2. 调整顺序
         ActionPill(
             icon = Icons.AutoMirrored.Rounded.Sort,
-            label = "编辑",
+            label = "调整顺序",
             enabled = !isTracksEmpty,
             onClick = onEditOrderClick
         )
 
+        }
         // 3. 切换排序
         ActionPill(
             icon = Icons.Rounded.FilterList,
@@ -84,7 +89,7 @@ fun PlaylistActionPillsRow(
         )
 
         // 4. 编辑信息
-        ActionPill(
+        if (isOwnedPlaylist) ActionPill(
             icon = Icons.Rounded.Edit,
             label = "歌单信息",
             enabled = true,

@@ -78,6 +78,7 @@ import com.lin0721.linmusic.feature.localmusic.ui.LocalAlbumAssociationHost
 import com.lin0721.linmusic.feature.artist.ui.catalog.AlbumArtistCorrectionHost
 import com.lin0721.linmusic.core.model.PlaylistDetail
 import com.lin0721.linmusic.core.model.isLikedSongsPlaylist
+import com.lin0721.linmusic.core.model.isOwnLikedSongs
 import com.lin0721.linmusic.core.ui.components.DraggableSongRow
 import com.lin0721.linmusic.core.ui.components.SelectionAction
 import com.lin0721.linmusic.core.ui.components.SongRowData
@@ -122,6 +123,8 @@ fun PlaylistScreen(
     val addMusicSearchState by viewModel.addMusicSearchState.collectAsStateWithLifecycle()
     val isSavingInfo by viewModel.isSavingInfo.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
+    val batchProgress by viewModel.batchProgress.collectAsStateWithLifecycle()
+    val pendingLikeIds by viewModel.pendingLikeIds.collectAsStateWithLifecycle()
     val albumAssociation: LocalAlbumAssociationViewModel? = if (isAlbum) koinViewModel() else null
     albumAssociation?.let { LocalAlbumAssociationHost(it) }
 
@@ -193,6 +196,7 @@ fun PlaylistScreen(
     var showBatchTargetSheet by remember { mutableStateOf(false) }
     var showBatchDownloadSheet by remember { mutableStateOf(false) }
     var showBatchRemoveConfirm by remember { mutableStateOf(false) }
+    var showBatchUnlikeConfirm by remember { mutableStateOf(false) }
     var isReorderMode by remember { mutableStateOf(false) }
     val sortState by sortViewModel.state.collectAsStateWithLifecycle()
     val sortTarget = PlaylistSortTarget(playlistId, isAlbum)
@@ -291,7 +295,7 @@ fun PlaylistScreen(
             is PlaylistUiState.Success -> {
                 val profile = userProfile
                 val isLikedSongsPlaylistView = profile != null &&
-                    isLikedSongsPlaylist(state.playlist.name, state.playlist.id, profile.uid)
+                    state.playlist.isOwnLikedSongs(profile.uid)
                 val isOwnedPlaylist = profile != null &&
                     state.playlist.id > 0L &&
                     state.playlist.creator?.userId == profile.uid &&
@@ -610,6 +614,8 @@ fun PlaylistScreen(
                             }
                         },
                         onEditInfoClick = { showEditInfoDialog = true },
+                        onEditSongsClick = { viewModel.enterSelection() },
+                        pendingLikeIds = pendingLikeIds,
                         hasMoreTracks = state.hasMoreTracks,
                         isLoadingMoreTracks = state.isLoadingMoreTracks,
                         onLoadMoreTracks = { viewModel.loadMoreTracks() },
@@ -694,26 +700,22 @@ fun PlaylistScreen(
                         active = selection.active,
                         selectedIds = selection.selectedIds,
                         onEnter = viewModel::enterSelection,
-                        onToggle = viewModel::toggleSelected
+                        onToggle = viewModel::toggleSelected,
+                        busy = batchProgress.active,
+                        progressText = batchProgress.text.takeIf { batchProgress.active }
                     ),
-                    selectionActions = buildList {
-                        add(SelectionAction("下一首播放", Icons.AutoMirrored.Filled.QueueMusic) { viewModel.batchPlayNext() })
-                        add(SelectionAction("添加到歌单", Icons.AutoMirrored.Filled.PlaylistAdd) {
-                            if (userProfile == null) {
-                                showLoginSheet = true
-                            } else {
-                                viewModel.prepareImportTargets(state.playlist.id)
-                                showBatchTargetSheet = true
-                            }
-                        })
-                        add(SelectionAction("喜欢", Icons.Default.FavoriteBorder) {
-                            if (userProfile == null) showLoginSheet = true else viewModel.batchLike()
-                        })
-                        add(SelectionAction("下载", Icons.Default.Download) { showBatchDownloadSheet = true })
-                        if (isOwnedPlaylist) {
-                            add(SelectionAction("删除", Icons.Default.Delete) { showBatchRemoveConfirm = true })
-                        }
-                    },
+                    selectionActions = playlistSelectionActions(
+                        canRemove = isOwnedPlaylist,
+                        playNext = { viewModel.batchPlayNext() },
+                        addToPlaylist = {
+                            if (userProfile == null) showLoginSheet = true
+                            else { viewModel.prepareImportTargets(state.playlist.id); showBatchTargetSheet = true }
+                        },
+                        like = { if (userProfile == null) showLoginSheet = true else viewModel.batchLike() },
+                        unlike = { if (userProfile == null) showLoginSheet = true else showBatchUnlikeConfirm = true },
+                        download = { showBatchDownloadSheet = true },
+                        remove = { showBatchRemoveConfirm = true }
+                    ),
                     onToggleSelectAll = viewModel::toggleSelectAll,
                     onExitSelection = viewModel::exitSelection
                 )
@@ -853,19 +855,30 @@ fun PlaylistScreen(
             )
         }
 
+        if (showBatchUnlikeConfirm) AlertDialog(
+            onDismissRequest = { showBatchUnlikeConfirm = false },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            title = { Text("取消喜欢", fontWeight = FontWeight.Bold) },
+            text = { Text("取消选中歌曲的喜欢标记？歌曲会从我喜欢的音乐中移除，其他普通歌单保留这些歌曲。") },
+            confirmButton = { MelodiaTextButton(onClick = { showBatchUnlikeConfirm = false; viewModel.batchLike(false) }) { Text("取消喜欢") } },
+            dismissButton = { MelodiaTextButton(onClick = { showBatchUnlikeConfirm = false }) { Text("返回") } }
+        )
+
         if (showBatchRemoveConfirm) {
             AlertDialog(
                 onDismissRequest = { showBatchRemoveConfirm = false },
                 title = {
                     Text(
-                        text = "从歌单中删除",
+                        text = "从歌单中移出",
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold
                     )
                 },
                 text = {
                     Text(
-                        text = "确定要从歌单中删除选中的 ${selection.count} 首歌曲吗？",
+                        text = "确定要从当前歌单移出选中的 ${selection.count} 首歌曲吗？",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp
                     )
@@ -876,7 +889,7 @@ fun PlaylistScreen(
                             showBatchRemoveConfirm = false
                             viewModel.batchRemove()
                         }
-                    ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                    ) { Text("移出歌单", color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = {
                     MelodiaTextButton(onClick = { showBatchRemoveConfirm = false }) {
@@ -916,7 +929,7 @@ fun PlaylistScreen(
         if (showMoreMenuSheet && successState != null) {
             val playlist = successState.playlist
             val isLikedSongsPlaylistView = userProfile?.let { profile ->
-                isLikedSongsPlaylist(playlist.name, playlist.id, profile.uid)
+                playlist.isOwnLikedSongs(profile.uid)
             } == true
             val moreMenuSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
@@ -999,12 +1012,12 @@ fun PlaylistScreen(
                     val isManageable = !isAlbum && userProfile != null &&
                         playlist.creator?.userId == userProfile?.uid &&
                         playlist.id > 0L &&
-                        playlist.id != userProfile?.uid
+                        !isLikedSongsPlaylistView
 
                     val menuItems = buildList {
-                        if (isLikedSongsPlaylistView) add(PlaylistMenuItem(
+                        if (!isAlbum && playlist.id > 0L) add(PlaylistMenuItem(
                             icon = Icons.Default.Edit,
-                            title = "编辑喜欢的歌曲"
+                            title = "编辑歌曲"
                         ) {
                             showMoreMenuSheet = false
                             viewModel.enterSelection()

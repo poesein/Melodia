@@ -41,7 +41,7 @@ class SongLikeRepositoryTest {
     }
 
     @Test
-    fun `likeSong 乐观添加并在失败时回滚`() = runTest {
+    fun `likeSong 成功后更新且失败保留已确认状态`() = runTest {
         val fakeApi = FakeSongLikeApi()
         val repository = SongLikeRepositoryImpl(fakeApi)
         repository.syncLikedSongIds(setOf(101L))

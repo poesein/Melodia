@@ -5,6 +5,8 @@ import com.lin0721.linmusic.core.download.DownloadTrackInfo
 import com.lin0721.linmusic.core.download.SongDownloader
 import com.lin0721.linmusic.core.download.toToastMessage
 import com.lin0721.linmusic.core.download.yearFromEpochMillis
+import com.lin0721.linmusic.core.model.isLikedSongsPlaylist
+import com.lin0721.linmusic.core.network.AppError
 import com.lin0721.linmusic.core.model.Track
 import com.lin0721.linmusic.core.network.ResourceProvider
 import com.lin0721.linmusic.core.network.toUserMessage
@@ -56,6 +58,7 @@ class TrackBatchActionsDelegate(
         if (tracks.isEmpty()) return false
         return playlistRepository.manipulatePlaylistTracks("add", targetPlaylistId, tracks.map { it.id }).first().fold(
             onSuccess = {
+                SongCollectDelegate.tracksChanged(targetPlaylistId, added = tracks.map { it.id }.toSet())
                 onToast("已添加 ${tracks.size} 首歌曲到歌单")
                 true
             },
@@ -98,35 +101,50 @@ class TrackBatchActionsDelegate(
         return true
     }
 
-    // 红心接口没有批量版本，逐首请求；已喜欢的跳过，返回成功喜欢的首数
-    suspend fun like(tracks: List<Track>, onToast: suspend (String) -> Unit): Int {
-        val liked = songLikeRepository.likedSongIds.value
-        val targets = tracks.filter { it.id !in liked }
-        if (targets.isEmpty()) {
-            onToast("所选歌曲都已在我喜欢的音乐中")
-            return 0
-        }
-        var succeeded = 0
+    suspend fun like(tracks: List<Track>, onToast: suspend (String) -> Unit): Int =
+        setLiked(tracks, true, onToast = onToast).succeededIds.size
+
+    suspend fun setLiked(
+        tracks: List<Track>,
+        liked: Boolean,
+        force: Boolean = false,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+        onApplied: (Long) -> Unit = {},
+        shouldStop: () -> Boolean = { false },
+        onToast: suspend (String) -> Unit
+    ): BatchLikeResult {
+        val ids = tracks.map { it.id }.filter { it > 0L }.distinct()
+        val unchanged = if (force) emptySet() else ids.filter { (it in songLikeRepository.likedSongIds.value) == liked }.toSet()
+        val targets = ids.filter { it !in unchanged }
+        val succeeded = linkedSetOf<Long>()
+        val failed = linkedSetOf<Long>()
         var firstError: Throwable? = null
-        for (track in targets) {
-            val result = songLikeRepository.likeSong(track.id, true).first()
-            if (result.isSuccess) succeeded++ else if (firstError == null) firstError = result.exceptionOrNull()
+        onProgress(unchanged.size, ids.size)
+        for (id in targets) {
+            if (shouldStop()) break
+            val result = songLikeRepository.likeSong(id, liked).first()
+            if (result.isSuccess) { succeeded += id; onApplied(id) }
+            else { failed += id; if (firstError == null) firstError = result.exceptionOrNull() }
+            onProgress(unchanged.size + succeeded.size + failed.size, ids.size)
+            if (firstError in setOf(AppError.RiskControl, AppError.NetworkError, AppError.Unauthorized)) break
         }
-        val failed = targets.size - succeeded
-        onToast(
-            when {
-                failed == 0 -> "已喜欢 $succeeded 首歌曲"
-                succeeded == 0 -> firstError?.toUserMessage(resourceProvider) ?: "操作失败"
-                else -> "已喜欢 $succeeded 首歌曲，$failed 首失败"
-            }
-        )
-        return succeeded
+        val unprocessed = (targets - succeeded - failed).toSet()
+        val verb = if (liked) "喜欢" else "取消喜欢"
+        onToast(when {
+            targets.isEmpty() -> if (liked) "所选歌曲都已在我喜欢的音乐中" else "所选歌曲均未标记喜欢"
+            failed.isEmpty() && unprocessed.isEmpty() -> "已$verb ${succeeded.size} 首歌曲"
+            succeeded.isEmpty() && firstError != null -> firstError.toUserMessage(resourceProvider)
+            unprocessed.isNotEmpty() -> "已$verb ${succeeded.size} 首，${failed.size + unprocessed.size} 首未完成，已保留选择"
+            else -> "已$verb ${succeeded.size} 首歌曲，${failed.size} 首失败"
+        })
+        return BatchLikeResult(succeeded, unchanged, failed + unprocessed)
     }
 
     suspend fun removeFromPlaylist(playlistId: Long, tracks: List<Track>, onToast: suspend (String) -> Unit): Boolean {
         if (tracks.isEmpty()) return false
         return playlistRepository.manipulatePlaylistTracks("del", playlistId, tracks.map { it.id }).first().fold(
             onSuccess = {
+                SongCollectDelegate.tracksChanged(playlistId, removed = tracks.map { it.id }.toSet())
                 onToast("已从歌单中删除 ${tracks.size} 首歌曲")
                 true
             },
@@ -146,7 +164,7 @@ class TrackBatchActionsDelegate(
         }
         return userPlaylistRepository.getUserPlaylists(profile.uid).first().fold(
             onSuccess = { playlists ->
-                playlists.filter { it.userId == profile.uid && it.id != excludePlaylistId && it.id != profile.uid }
+                playlists.filter { it.userId == profile.uid && it.id != excludePlaylistId && !isLikedSongsPlaylist(it.name, it.id, profile.uid) }
             },
             onFailure = {
                 onToast(it.toUserMessage(resourceProvider))
@@ -154,4 +172,9 @@ class TrackBatchActionsDelegate(
             }
         )
     }
+}
+
+/** Successful and unchanged items can be deselected; remaining items stay retryable. */
+data class BatchLikeResult(val succeededIds: Set<Long>, val unchangedIds: Set<Long>, val remainingIds: Set<Long>) {
+    val complete: Boolean get() = remainingIds.isEmpty()
 }

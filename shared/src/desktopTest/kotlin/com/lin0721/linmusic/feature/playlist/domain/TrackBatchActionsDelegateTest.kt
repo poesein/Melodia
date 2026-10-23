@@ -176,4 +176,29 @@ class TrackBatchActionsDelegateTest {
         assertNotNull(result)
         assertEquals(listOf(11L), result!!.map { it.id })
     }
+    @Test fun unlikeSkipsUnlikedAndRetainsOnlyFailuresForRetry() = runBlocking {
+        likeRepository.syncLikedSongIds(setOf(1, 2, 3)); likeRepository.failingIds += 2L
+        val progress = mutableListOf<Int>()
+        val result = delegate.setLiked(tracks, false, onProgress = { done, _ -> progress += done }, onToast = onToast)
+        assertEquals(setOf(1L, 3L), result.succeededIds)
+        assertEquals(setOf(2L), result.remainingIds)
+        assertEquals(setOf(2L), likeRepository.likedSongIds.value)
+        assertEquals(3, progress.last())
+    }
+
+    @Test fun stoppingABatchPreservesAllNotYetProcessedIdsAndDoesNotResendSuccesses() = runBlocking {
+        likeRepository.syncLikedSongIds(setOf(1, 2, 3))
+        var stop = false
+        val first = delegate.setLiked(tracks, false, onApplied = { stop = true }, shouldStop = { stop }, onToast = onToast)
+        assertEquals(setOf(1L), first.succeededIds); assertEquals(setOf(2L, 3L), first.remainingIds)
+        val second = delegate.setLiked(tracks.filter { it.id in first.remainingIds }, false, onToast = onToast)
+        assertTrue(second.complete); assertEquals(listOf(1L, 2L, 3L), likeRepository.likeCalls)
+    }
+
+    @Test fun likedPageCanSendUnlikesEvenBeforeTheGlobalHeartListWasLoaded() = runBlocking {
+        likeRepository.syncLikedSongIds(emptySet())
+        val result = delegate.setLiked(tracks, false, force = true, onToast = onToast)
+        assertEquals(setOf(1L, 2L, 3L), result.succeededIds)
+    }
+
 }

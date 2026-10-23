@@ -38,3 +38,13 @@ data class PlaylistImportState(
     val items: List<UserPlaylist> = emptyList(),
     val isLoading: Boolean = false
 )
+
+data class TrackBatchProgress(
+    val active: Boolean = false,
+    val label: String = "正在处理歌曲",
+    val completed: Int = 0,
+    val total: Int = 0,
+    val stopping: Boolean = false
+) {
+    val text: String get() = if (stopping) "正在停止…" else "$label $completed/$total"
+}

@@ -96,6 +96,10 @@ data class PlaylistTrackId(
 fun isLikedSongsPlaylist(name: String, playlistId: Long, uid: Long?): Boolean =
     name.contains("喜欢的音乐") || (uid != null && playlistId == uid)
 
+// A different user's system list is read-only; red-heart writes always belong to the signed-in account.
+fun PlaylistDetail.isOwnLikedSongs(uid: Long?): Boolean = uid != null &&
+    (creator?.userId == uid || id == uid) && isLikedSongsPlaylist(name, id, uid)
+
 // 歌手领域模型，artist/player/home 等多域共用
 @Serializable
 data class ArtistInfo(

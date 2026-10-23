@@ -37,6 +37,10 @@ class SongCollectDelegate(
         // 歌单包含歌曲 ID 集合缓存 (歌单 id -> 歌曲 ID Set)
         private val playlistTrackIdsCache = ConcurrentHashMap<Long, MutableSet<Long>>()
 
+        fun tracksChanged(playlistId: Long, added: Set<Long> = emptySet(), removed: Set<Long> = emptySet()) {
+            playlistTrackIdsCache[playlistId]?.let { ids -> ids.addAll(added); ids.removeAll(removed) }
+        }
+
         fun clearCache() {
             userPlaylistsCache.clear()
             playlistTrackIdsCache.clear()
@@ -130,7 +134,7 @@ class SongCollectDelegate(
         onLikedChanged: (Set<Long>) -> Unit
     ) {
         val profile = userPreferences.userProfile.first()
-        var liked = likedSongIds
+        var failed = false
 
         items.forEach { item ->
             if (item.isContains == item.isInitiallyContains) return@forEach
@@ -138,10 +142,9 @@ class SongCollectDelegate(
             if (profile != null && isLikedSongsPlaylist(item.playlistName, item.playlistId, profile.uid)) {
                 songLikeRepository.likeSong(songId, item.isContains).firstOrNull()
                     ?.onSuccess {
-                        liked = if (item.isContains) liked + songId else liked - songId
-                        onLikedChanged(liked)
+                        onLikedChanged(songLikeRepository.likedSongIds.value)
                     }
-                    ?.onFailure { onToast(it.toUserMessage(resourceProvider)) }
+                    ?.onFailure { failed = true; onToast(it.toUserMessage(resourceProvider)) }
             } else {
                 val op = if (item.isContains) "add" else "del"
                 playlistRepository.manipulatePlaylistTracks(op, item.playlistId, listOf(songId)).firstOrNull()
@@ -151,10 +154,10 @@ class SongCollectDelegate(
                             if (item.isContains) cachedIds.add(songId) else cachedIds.remove(songId)
                         }
                     }
-                    ?.onFailure { onToast(it.toUserMessage(resourceProvider)) }
+                    ?.onFailure { failed = true; onToast(it.toUserMessage(resourceProvider)) }
             }
         }
-        onToast("歌单收藏更新成功")
+        if (!failed) onToast("歌单收藏更新成功")
     }
 
     // 新建歌单并把歌曲加入，成功后清理自建歌单列表缓存并重新拉取弹窗列表以带出新歌单

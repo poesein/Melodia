@@ -77,7 +77,7 @@ class PlaylistReverseSortUiTest {
     @Test fun enteringManualEditingRestoresTheRealPlaylistOrder() {
         order = PlaylistTrackSort(reversed = true)
         show()
-        compose.onNodeWithText("编辑").performClick()
+        compose.onNodeWithText("调整顺序").performClick()
         compose.runOnIdle {
             assertEquals(1, edits); assertEquals(PlaylistTrackSort(), order)
             assertEquals(listOf(3L, 2L, 1L), songs.map { it.id })

@@ -101,6 +101,8 @@ fun PlaylistContent(
     onAddMusicClick: () -> Unit = {},
     onEditOrderClick: () -> Unit = {},
     onEditInfoClick: () -> Unit = {},
+    onEditSongsClick: () -> Unit = {},
+    pendingLikeIds: Set<Long> = emptySet(),
     hasMoreTracks: Boolean = false,
     isLoadingMoreTracks: Boolean = false,
     onLoadMoreTracks: () -> Unit = {},
@@ -154,7 +156,7 @@ fun PlaylistContent(
     }
     // 曲目行在 LazyColumn 里的起始下标：header + 视条件出现的胶囊行/日期行
     val trackListStartIndex = 1 +
-        (if (canRemoveFromPlaylist && !isDailyRecommend) 1 else 0) +
+        (if ((canRemoveFromPlaylist || isLikedSongsPlaylistView) && !isDailyRecommend) 1 else 0) +
         (if (playlist.id == -1L && showHistoryDatePicker) 1 else 0) +
         (if (playlist.id == -2L) 1 else 0)
 
@@ -294,7 +296,7 @@ fun PlaylistContent(
             }
 
             // 自建歌单快捷操作小胶囊行；搜索展开意图确定后同样淡出收起
-            if (canRemoveFromPlaylist && !isDailyRecommend) {
+            if ((canRemoveFromPlaylist || isLikedSongsPlaylistView) && !isDailyRecommend) {
                 item(key = "action_pills") {
                     AnimatedVisibility(
                         visible = !searchFullyRevealed,
@@ -303,6 +305,8 @@ fun PlaylistContent(
                     ) {
                         PlaylistActionPillsRow(
                             isOwnedPlaylist = canRemoveFromPlaylist,
+                            isLikedSongsPlaylist = isLikedSongsPlaylistView,
+                            onEditSongsClick = onEditSongsClick,
                             isTracksEmpty = playlist.tracks.isEmpty(),
                             currentSortOrder = sortOrder,
                             onAddMusicClick = onAddMusicClick,
@@ -371,7 +375,8 @@ fun PlaylistContent(
                     onMoreClick        = { activeSongMoreOptions = it },
                     trackPlayCounts    = trackPlayCounts,
                     unplayableIds      = unplayableIds,
-                    selectionUi        = selectionUi
+                    selectionUi        = selectionUi,
+                    pendingLikeIds     = pendingLikeIds
                 )
 
                 if (isLoadingMoreTracks) {

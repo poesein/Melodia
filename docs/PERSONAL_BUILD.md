@@ -1,5 +1,7 @@
 # Melodia Personal 的构建与后续更新
 
+当前 beta.30 统一歌单编辑和多选，修复连续取消喜欢的状态同步与限流处理。见 [beta.30 说明](PERSONAL_BETA30_FIXES.md)。
+
 当前 beta.29 将全专辑播放改为逐张接续，仅预读下一张，复用已读及本地配对曲目表，并增加“仅显示专辑封面”设置。见 [beta.29 修复说明](PERSONAL_BETA29_FIXES.md)。
 
 当前 beta.28 已在 beta.27 完整个人版上收敛远程修改，详见 [beta.28 修复说明](PERSONAL_BETA28_FIXES.md) 与 [当前严格换源规则](STRICT_AUDIO_FALLBACK.md)。下文 beta.27 及更早为历史记录；严格换源已按用户确认改为元数据核对，不再要求官方试听音频。
