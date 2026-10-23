@@ -22,13 +22,19 @@ class PlaylistMultiSelectUiTest {
         var likes by mutableStateOf(true)
         var edits = 0; var reorders = 0
         compose.setContent { MelodiaTheme { Surface {
-            PlaylistActionPillsRow(!likes, false, PlaylistTrackSort(), {}, { reorders++ }, {}, {},
-                isLikedSongsPlaylist = likes, onEditSongsClick = { edits++ })
+            Column {
+                playlistEditingMenuItems(!likes, false, PlaylistTrackSort(), { edits++ }, {},
+                    { reorders++ }, {}, {}, {}).forEach { PlaylistMenuRow(it) }
+            }
         } } }
+        compose.onAllNodesWithText("编辑歌曲").assertCountEquals(1)
         compose.onNodeWithText("编辑歌曲").performClick()
         compose.onNodeWithText("调整顺序").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, edits); likes = false }
         compose.onNodeWithText("编辑歌曲").performClick()
+        compose.onAllNodesWithText("编辑歌单信息").assertCountEquals(1)
+        compose.onNodeWithText("添加音乐").assertExists()
+        compose.onNodeWithText("歌曲排序").assertExists()
         compose.onNodeWithText("调整顺序").performClick()
         compose.runOnIdle { assertEquals(2, edits); assertEquals(1, reorders) }
     }
@@ -50,7 +56,7 @@ class PlaylistMultiSelectUiTest {
         compose.onNodeWithText("移出歌单").performClick()
         compose.runOnIdle { assertEquals(listOf("like", "unlike", "add", "remove"), calls) }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        File(context.getExternalFilesDir(null), "beta30-multi-select.png").outputStream().use { output ->
+        File(context.getExternalFilesDir(null), "beta31-multi-select.png").outputStream().use { output ->
             compose.onRoot().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
         }
         compose.runOnIdle { busy = true }

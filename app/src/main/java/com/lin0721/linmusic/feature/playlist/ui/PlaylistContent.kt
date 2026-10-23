@@ -98,10 +98,6 @@ fun PlaylistContent(
     onLoadDailyRecommend: () -> Unit = {},
     canRemoveFromPlaylist: Boolean = false,
     onRemoveFromPlaylist: (Long) -> Unit = {},
-    onAddMusicClick: () -> Unit = {},
-    onEditOrderClick: () -> Unit = {},
-    onEditInfoClick: () -> Unit = {},
-    onEditSongsClick: () -> Unit = {},
     pendingLikeIds: Set<Long> = emptySet(),
     hasMoreTracks: Boolean = false,
     isLoadingMoreTracks: Boolean = false,
@@ -114,7 +110,6 @@ fun PlaylistContent(
     onToggleSelectAll: (List<Long>) -> Unit = {},
     onExitSelection: () -> Unit = {},
     sortOrder: PlaylistTrackSort = PlaylistTrackSort(),
-    onSortOrderChange: (PlaylistTrackSort) -> Unit = {},
     onCompleteTrackOrder: () -> Unit = {}
 ) {
     val density = LocalDensity.current
@@ -137,7 +132,6 @@ fun PlaylistContent(
     }
 
     var searchQuery by remember { mutableStateOf("") }
-    var showSortSheet by remember { mutableStateOf(false) }
     val waitingForOrder = sortOrder.reversed && hasMoreTracks
     val sortedTracks = remember(playlist.tracks, sortOrder) { sortOrder.sort(playlist.tracks) }
     val filteredTracks = remember(sortedTracks, searchQuery) {
@@ -154,9 +148,8 @@ fun PlaylistContent(
     } else {
         playlist.tracks.any { it.id == targetTrackId }
     }
-    // 曲目行在 LazyColumn 里的起始下标：header + 视条件出现的胶囊行/日期行
+    // 曲目行在 LazyColumn 里的起始下标：header + 视条件出现的日期行
     val trackListStartIndex = 1 +
-        (if ((canRemoveFromPlaylist || isLikedSongsPlaylistView) && !isDailyRecommend) 1 else 0) +
         (if (playlist.id == -1L && showHistoryDatePicker) 1 else 0) +
         (if (playlist.id == -2L) 1 else 0)
 
@@ -290,34 +283,6 @@ fun PlaylistContent(
                                     playButtonBaselineYPx = y
                                 }
                             }
-                        )
-                    }
-                }
-            }
-
-            // 自建歌单快捷操作小胶囊行；搜索展开意图确定后同样淡出收起
-            if ((canRemoveFromPlaylist || isLikedSongsPlaylistView) && !isDailyRecommend) {
-                item(key = "action_pills") {
-                    AnimatedVisibility(
-                        visible = !searchFullyRevealed,
-                        enter   = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-                        exit    = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
-                    ) {
-                        PlaylistActionPillsRow(
-                            isOwnedPlaylist = canRemoveFromPlaylist,
-                            isLikedSongsPlaylist = isLikedSongsPlaylistView,
-                            onEditSongsClick = onEditSongsClick,
-                            isTracksEmpty = playlist.tracks.isEmpty(),
-                            currentSortOrder = sortOrder,
-                            onAddMusicClick = onAddMusicClick,
-                            onEditOrderClick = {
-                                // 拖拽排的是歌单真实顺序。停留在本地排序视图时进入重排，列表会突然跳回默认序，
-                                // 保存后回来又被排序规则盖住看不到结果，因此进入前先把视图切回默认
-                                onSortOrderChange(PlaylistTrackSort())
-                                onEditOrderClick()
-                            },
-                            onSortClick = { showSortSheet = true },
-                            onEditInfoClick = onEditInfoClick
                         )
                     }
                 }
@@ -529,15 +494,4 @@ fun PlaylistContent(
         )
     }
 
-    if (showSortSheet) {
-        PlaylistSortSheet(
-            sortOrder = sortOrder,
-            onSortOrderChange = {
-                onSortOrderChange(it)
-                showSortSheet = false
-            },
-            onDismiss = { showSortSheet = false }
-        )
-    }
 }
-

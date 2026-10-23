@@ -185,6 +185,7 @@ fun PlaylistScreen(
     val composerState by viewModel.composerState.collectAsStateWithLifecycle()
     val floorState by viewModel.floorState.collectAsStateWithLifecycle()
     var showMoreMenuSheet by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
     var albumArtistCorrection by remember(playlistId, isAlbum) { mutableStateOf<PlaylistDetail?>(null) }
     var artistPickerEntries by remember { mutableStateOf<List<ArtistPickerEntry>>(emptyList()) }
     var showImportTargetSheet by remember { mutableStateOf(false) }
@@ -593,9 +594,6 @@ fun PlaylistScreen(
                     PlaylistContent(
                         playlist       = state.playlist,
                         sortOrder = trackSort,
-                        onSortOrderChange = { requested ->
-                            activeSortScope?.let { sortViewModel.save(it, requested) }
-                        },
                         onCompleteTrackOrder = { viewModel.ensureAllTracksLoaded {} },
                         totalDurationMs = totalDurationMs,
                         showPlayCount = !isAlbum,
@@ -604,17 +602,6 @@ fun PlaylistScreen(
                         onRemoveFromPlaylist = { songId ->
                             viewModel.removeTrackFromPlaylist(state.playlist.id, songId)
                         },
-                        onAddMusicClick = { showAddMusicSheet = true },
-                        onEditOrderClick = {
-                            // 排序保存是全量覆盖，必须先补全未加载的曲目，否则会把服务端剩余部分删掉
-                            viewModel.ensureAllTracksLoaded { allTracks ->
-                                reorderedTracks.clear()
-                                reorderedTracks.addAll(allTracks)
-                                isReorderMode = true
-                            }
-                        },
-                        onEditInfoClick = { showEditInfoDialog = true },
-                        onEditSongsClick = { viewModel.enterSelection() },
                         pendingLikeIds = pendingLikeIds,
                         hasMoreTracks = state.hasMoreTracks,
                         isLoadingMoreTracks = state.isLoadingMoreTracks,
@@ -926,6 +913,16 @@ fun PlaylistScreen(
         albumArtistCorrection?.let { album ->
             AlbumArtistCorrectionHost(album, onDismiss = { albumArtistCorrection = null })
         }
+        if (showSortSheet && successState != null) {
+            PlaylistSortSheet(
+                sortOrder = trackSort,
+                onSortOrderChange = { requested ->
+                    activeSortScope?.let { sortViewModel.save(it, requested) }
+                    showSortSheet = false
+                },
+                onDismiss = { showSortSheet = false }
+            )
+        }
         if (showMoreMenuSheet && successState != null) {
             val playlist = successState.playlist
             val isLikedSongsPlaylistView = userProfile?.let { profile ->
@@ -1015,13 +1012,39 @@ fun PlaylistScreen(
                         !isLikedSongsPlaylistView
 
                     val menuItems = buildList {
-                        if (!isAlbum && playlist.id > 0L) add(PlaylistMenuItem(
-                            icon = Icons.Default.Edit,
-                            title = "编辑歌曲"
-                        ) {
-                            showMoreMenuSheet = false
-                            viewModel.enterSelection()
-                        })
+                        if (!isAlbum && playlist.id > 0L) addAll(playlistEditingMenuItems(
+                            isManageable = isManageable,
+                            isTracksEmpty = playlist.tracks.isEmpty(),
+                            sortOrder = trackSort,
+                            onEditSongsClick = {
+                                showMoreMenuSheet = false
+                                viewModel.enterSelection()
+                            },
+                            onAddMusicClick = {
+                                showMoreMenuSheet = false
+                                showAddMusicSheet = true
+                            },
+                            onEditOrderClick = {
+                                showMoreMenuSheet = false
+                                // Saving order replaces the complete server list; load every track first.
+                                viewModel.ensureAllTracksLoaded { allTracks ->
+                                    reorderedTracks.clear()
+                                    reorderedTracks.addAll(allTracks)
+                                    isReorderMode = true
+                                }
+                            },
+                            onSortClick = {
+                                showMoreMenuSheet = false
+                                showSortSheet = true
+                            },
+                            onEditInfoClick = {
+                                showMoreMenuSheet = false
+                                showEditInfoDialog = true
+                            },
+                            onSortOrderChange = { requested ->
+                                activeSortScope?.let { sortViewModel.save(it, requested) }
+                            }
+                        ))
                         if (isAlbum) add(PlaylistMenuItem(
                             icon = Icons.Default.LibraryAdd,
                             title = "显示在歌手专辑页"
@@ -1115,15 +1138,6 @@ fun PlaylistScreen(
                         if (isManageable) {
                             add(
                                 PlaylistMenuItem(
-                                    icon = Icons.Default.Edit,
-                                    title = "编辑歌单信息"
-                                ) {
-                                    showMoreMenuSheet = false
-                                    showEditInfoDialog = true
-                                }
-                            )
-                            add(
-                                PlaylistMenuItem(
                                     icon = Icons.Default.Delete,
                                     title = "删除歌单",
                                     isDestructive = true
@@ -1139,38 +1153,7 @@ fun PlaylistScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         items(menuItems, key = { it.title }) { item ->
-                            val iconColor = if (item.isDestructive) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                            val titleColor = if (item.isDestructive) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(onClick = item.onClick)
-                                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = item.icon,
-                                    contentDescription = item.title,
-                                    tint = iconColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(MelodiaSpacing.md))
-                                Text(
-                                    text = item.title,
-                                    color = titleColor,
-                                    fontSize = 15.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                            PlaylistMenuRow(item)
                         }
                     }
                 }
@@ -1337,10 +1320,3 @@ fun PlaylistScreen(
 
     }
 }
-
-private data class PlaylistMenuItem(
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val title: String,
-    val isDestructive: Boolean = false,
-    val onClick: () -> Unit
-)
